@@ -1,0 +1,18 @@
+{
+  "name": "emphant-studio-tauri",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "dev": "pnpm --filter @emphant/desktop dev",
+    "build": "pnpm --filter @emphant/desktop build",
+    "tauri": "pnpm --filter @emphant/desktop tauri",
+    "typecheck": "pnpm --filter @emphant/desktop typecheck",
+    "lint": "pnpm --filter @emphant/desktop lint"
+  },
+  "pnpm": {
+    "overrides": {
+      "@noble/hashes": "1.8.0"
+    }
+  }
+}

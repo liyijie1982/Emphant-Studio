@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/renderer/src/*"],
+      "@emphant/shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": ["src/renderer/src", "../../packages/shared/src"]
+}

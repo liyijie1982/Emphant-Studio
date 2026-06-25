@@ -391,7 +391,7 @@ const initialAssistants: Assistant[] = [
     providerId: 'provider-openai-compatible',
     model: 'gpt-4.1',
     systemPrompt:
-      '你是 Emphant Studio 的意图识别 Agent。先理解用户目标，再决定直接回答或委派给一个或多个专业 Agent，最后汇总为统一答复。',
+      '你是 Emphant Studio 的意图识别 Agent。先理解用户目标，再决定直接回答或委派给专业 Agent。简单任务只委派一个最匹配的 Agent；只读运维查询、状态检查、Docker 服务列表等任务不得多级委派。汇总时去重寒暄、重复选择题、安全免责声明、执行计划和工具能力说明，只保留结论、关键结果、失败原因和最小下一步。未经用户明确要求，不要生成脚本、PDF、备忘单或其他文件。',
     contextLimit: 12,
     capabilities: ['意图识别', '自动路由', '多 Agent 协作', '工具调用'],
     knowledgeBaseIds: ['kb-prd', 'kb-design'],
@@ -520,7 +520,7 @@ const initialAssistants: Assistant[] = [
     providerId: 'provider-openai-compatible',
     model: 'gpt-4.1-mini',
     systemPrompt:
-      '你是一个系统操作助手。执行命令前先判断风险，只执行工作区内的低风险命令；涉及删除、sudo、系统目录、安装依赖、提交或推送代码等中高风险操作时，必须先说明影响并要求用户确认。命令结果要总结退出码、关键输出和下一步建议。',
+      '你是一个系统操作助手。先判断风险；只读查询命令（如 pwd、git status、docker ps、systemctl status、df -h、ssh BatchMode 探测）属于低风险，不需要二次确认，应直接执行无交互、可超时的探测。涉及删除、sudo、系统目录、安装依赖、提交或推送代码等中高风险操作时，必须先说明影响并要求用户确认。命令结果要精简总结退出码、关键输出和下一步建议；不要输出安全免责声明、执行计划、确认问题或工具能力说明。未经用户明确要求，不要生成脚本、PDF、备忘单或其他文件。',
     contextLimit: 10,
     capabilities: ['聊天', '命令执行', '文件', '系统操作'],
     knowledgeBaseIds: ['kb-prd'],
@@ -531,6 +531,19 @@ const initialAssistants: Assistant[] = [
       'tool-file-edit',
       'tool-system-automation'
     ]
+  },
+  {
+    id: 'assistant-linux-ops',
+    name: '运维助手',
+    description: '通过受控命令和 SSH 检查、诊断并管理多台 Linux 服务器。',
+    providerId: 'provider-openai-compatible',
+    model: 'gpt-4.1',
+    systemPrompt:
+      '你是 Emphant Studio 的 Linux 运维助手。面向多台 Linux 服务器执行巡检、故障诊断、容量分析、服务状态检查和变更方案设计。默认优先处理只读命令；docker ps、systemctl status、df -h、uptime、ssh 连通性探测等只读检查属于低风险，不需要二次确认，应直接使用可用工具执行。用户提供的 SSH 密码可用于本次受控连接，但不得回显、保存或记录。缺少必要连接信息时只追问一个必要信息。不得再委派给其他 Agent。涉及重启服务、修改配置、安装软件、删除文件、变更防火墙、扩缩容、数据库写操作或 sudo 权限时，必须先说明影响、回滚方式和验证步骤，并等待用户确认。输出必须精简：不要复述用户目标，不要写安全免责声明、执行计划、确认问题、PDF/脚本/离线指南推荐；只给结论、关键数据和必要下一步。',
+    contextLimit: 16,
+    capabilities: ['Linux', 'SSH 巡检', '多服务器管理', '故障诊断', '变更确认'],
+    knowledgeBaseIds: [],
+    enabledToolIds: ['tool-shell-command', 'tool-filesystem', 'tool-file-write']
   }
 ]
 
@@ -720,6 +733,32 @@ const initialSkills: Skill[] = [
     requiredToolIds: ['tool-document-extract'],
     permissions: ['workspace.read', 'knowledge.write'],
     triggers: ['整理知识', '沉淀笔记', '加入知识库']
+  },
+  {
+    id: 'skill-linux-server-ops',
+    name: 'Linux 多服务器运维',
+    description: '通过 SSH 或受控终端检查多台 Linux 服务器的健康、服务、日志、容量和安全风险。',
+    kind: 'prompt',
+    instructions:
+      '对只读查询不要过度追问，已有主机和凭据时直接使用可用工具执行。docker ps、systemctl status、df -h、uptime 等只读检查属于低风险，不需要二次确认。多主机巡检时按主机输出关键结果。任何会修改远端状态的操作都要先给出影响、命令、回滚和验证方案，并等待用户确认。输出必须精简，只包含命令摘要、退出码、关键输出、风险等级和下一步建议；不得打印或保存密钥、token、密码等敏感信息；未经用户明确要求，不要生成脚本、PDF、备忘单或其他文件。',
+    tags: ['Linux', '运维', 'SSH', '服务器', '巡检'],
+    enabled: true,
+    version: '1.0.0',
+    source: 'builtin',
+    requiredToolIds: ['tool-shell-command', 'tool-filesystem'],
+    permissions: ['workspace.read', 'network.fetch'],
+    triggers: [
+      '运维',
+      '服务器巡检',
+      'Linux服务器',
+      'ssh',
+      'docker',
+      'docker ps',
+      '故障排查',
+      '磁盘满了',
+      '服务状态',
+      '日志检查'
+    ]
   }
 ]
 
@@ -736,7 +775,8 @@ const defaultAssistantSkillIds: Record<string, string[]> = {
   ],
   'assistant-todo': ['skill-todo-assistant'],
   'assistant-system-operator': ['skill-command', 'skill-desktop'],
-  'assistant-mail': ['skill-inbox-triage']
+  'assistant-mail': ['skill-inbox-triage'],
+  'assistant-linux-ops': ['skill-linux-server-ops']
 }
 
 const initialTopics: Topic[] = [
@@ -1669,6 +1709,10 @@ export const sendAssistantReply = createAsyncThunk(
 
     if (isMailAssistant && agentResult?.status !== 'awaiting-approval') {
       await refreshMailNotifications(dispatch)
+    }
+
+    if (agentResult?.status === 'completed') {
+      window.dispatchEvent(new CustomEvent('emphant:profile-updated'))
     }
 
     matchedKnowledge.forEach((item) => {

@@ -15,6 +15,7 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 use tokio::{fs, io::AsyncWriteExt};
+use tokio::{process::Command, time::timeout};
 use walkdir::{DirEntry, WalkDir};
 
 const APP_NAME: &str = "Emphant Studio";
@@ -27,6 +28,10 @@ const GENERATED_DIRECTORY: &str = "emphant-generated";
 const WORKSPACE_DATABASE: &str = "workspace.db";
 const MAX_DOCUMENT_SIZE: usize = 25 * 1024 * 1024;
 const MAX_EXTRACTED_LENGTH: usize = 500_000;
+const MAX_COMMAND_OUTPUT_LENGTH: usize = 20_000;
+const KNOWLEDGE_INDEX_SEGMENT_CHARS: usize = 10_000;
+const KNOWLEDGE_INDEX_MAX_SEGMENTS: usize = 10;
+const KNOWLEDGE_FALLBACK_CHUNK_CHARS: usize = 3_200;
 
 #[derive(Debug, Error)]
 enum CommandError {
@@ -338,33 +343,80 @@ fn strip_content_path_marker(content: &str) -> (Option<PathBuf>, String) {
     (None, content.to_string())
 }
 
-fn should_autosave_generated_content(prompt: &str, answer: &str) -> bool {
-    let text = format!("{}\n{}", prompt, answer).to_ascii_lowercase();
-    [
-        "生成",
-        "创建",
-        "写一个",
-        "代码",
-        "文件",
-        "文档",
-        "报告",
+fn should_autosave_generated_content(prompt: &str) -> bool {
+    let text = prompt.to_ascii_lowercase();
+    let explicit_phrases = [
+        "生成文件",
+        "创建文件",
+        "保存文件",
+        "写入文件",
         "落盘",
-        "保存",
-        "generate",
-        "create",
-        "write",
-        "file",
-        "code",
-        "document",
-        "report",
-        "save",
+        "另存为",
+        "保存为",
+        "导出",
+        "生成脚本",
+        "写个脚本",
+        "写一个脚本",
+        "创建脚本",
+        "生成文档",
+        "创建文档",
+        "生成报告",
+        "创建报告",
+        "save as",
+        "save to",
+        "write to",
+        "create file",
+        "generate file",
+        "export",
+        "create a script",
+        "generate a script",
+        "write a script",
+        "create a document",
+        "generate a document",
+        "create a report",
+        "generate a report",
+    ];
+    if explicit_phrases.iter().any(|needle| text.contains(needle)) {
+        return true;
+    }
+
+    let has_artifact_action = [
+        "生成", "创建", "保存", "写入", "导出", "generate", "create", "save", "export",
     ]
     .iter()
-    .any(|needle| text.contains(needle))
+    .any(|needle| text.contains(needle));
+    let has_artifact_noun = [
+        ".sh",
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".md",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".sql",
+        ".html",
+        ".css",
+        "脚本文件",
+        "文档文件",
+        "报告文件",
+        "markdown 文件",
+        "json 文件",
+        "yaml 文件",
+        "shell script",
+        "markdown file",
+        "json file",
+        "yaml file",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle));
+
+    has_artifact_action && has_artifact_noun
 }
 
 fn extract_generated_files(prompt: &str, answer: &str) -> Vec<(PathBuf, String)> {
-    let autosave = should_autosave_generated_content(prompt, answer);
+    let autosave = should_autosave_generated_content(prompt);
     let mut files = Vec::new();
     let mut remaining = answer;
 
@@ -1667,6 +1719,473 @@ fn model_messages(request: &Value, include_answer: bool) -> Vec<Value> {
     messages
 }
 
+fn assistant_tool_enabled(assistant: &Value, tool_id: &str) -> bool {
+    assistant
+        .get("enabledToolIds")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|id| id.as_str() == Some(tool_id))
+}
+
+fn request_tool_enabled(request: &Value, assistant: &Value, tool_id: &str) -> bool {
+    if !assistant_tool_enabled(assistant, tool_id) {
+        return false;
+    }
+    request
+        .get("enabledTools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|tool| value_str(tool, "id") == Some(tool_id))
+}
+
+fn shell_command_tool_definition() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "在当前 Emphant Studio 工作区内执行低风险、非交互的 shell 命令，并返回 stdout、stderr 和退出码。适合 pwd、ls、rg、git status、docker ps、df -h 等检查命令。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "要执行的完整 shell 命令。命令会通过 sh -lc 在工作区目录中运行。"
+                    },
+                    "timeoutSeconds": {
+                        "type": "integer",
+                        "description": "超时时间，1 到 30 秒，默认 30 秒。",
+                        "minimum": 1,
+                        "maximum": 30
+                    }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+            }
+        }
+    })
+}
+
+fn ssh_command_tool_definition() -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": "run_ssh_command",
+            "description": "通过本机 ssh/sshpass 对远程 Linux 主机执行低风险、只读的非交互命令，并返回 stdout、stderr 和退出码。适合 df -h、uptime、docker ps、systemctl status 等巡检命令。密码只作为进程环境变量传递，不会展示给用户或写入结果。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "远程主机 IP 或域名。"
+                    },
+                    "user": {
+                        "type": "string",
+                        "description": "SSH 用户名。"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "SSH 密码。仅用于本次连接，工具事件会脱敏。"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "要在远程主机执行的低风险只读命令，例如 df -h。"
+                    },
+                    "timeoutSeconds": {
+                        "type": "integer",
+                        "description": "超时时间，1 到 60 秒，默认 60 秒。",
+                        "minimum": 1,
+                        "maximum": 60
+                    }
+                },
+                "required": ["host", "user", "command"],
+                "additionalProperties": false
+            }
+        }
+    })
+}
+
+fn truncate_output(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let mut truncated = text
+        .chars()
+        .take(limit.saturating_sub(80))
+        .collect::<String>();
+    truncated.push_str("\n\n[输出已截断]");
+    truncated
+}
+
+fn command_risk_reason(command: &str) -> Option<String> {
+    let lower = command.to_lowercase();
+    let blocked_fragments = [
+        "sudo ",
+        " su ",
+        "rm ",
+        "rm\t",
+        "rm -",
+        "rmdir ",
+        "mv ",
+        "cp ",
+        "chmod ",
+        "chown ",
+        "dd ",
+        "mkfs",
+        "mount ",
+        "umount ",
+        "kill ",
+        "pkill ",
+        "reboot",
+        "shutdown",
+        "launchctl ",
+        "systemctl restart",
+        "systemctl stop",
+        "brew install",
+        "apt install",
+        "apt-get install",
+        "yum install",
+        "dnf install",
+        "pip install",
+        "npm install",
+        "pnpm install",
+        "yarn add",
+        "git push",
+        "git commit",
+        ">",
+        ">>",
+        "| tee ",
+    ];
+    blocked_fragments
+        .iter()
+        .find(|fragment| lower.contains(**fragment))
+        .map(|fragment| format!("命令包含需要用户确认的高风险片段：{}", fragment.trim()))
+}
+
+fn redact_sensitive_text(text: &str) -> String {
+    let mut redacted = text.to_string();
+    for marker in ["sshpass -p ", "SSHPASS=", "password=", "PASSWORD="] {
+        while let Some(start) = redacted.find(marker) {
+            let value_start = start + marker.len();
+            let value_end = redacted[value_start..]
+                .find(char::is_whitespace)
+                .map(|index| value_start + index)
+                .unwrap_or(redacted.len());
+            redacted.replace_range(value_start..value_end, "******");
+        }
+    }
+    redacted
+}
+
+fn redact_sensitive_json(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| {
+                    let lower_key = key.to_ascii_lowercase();
+                    let redacted_value = if lower_key.contains("password")
+                        || lower_key.contains("passwd")
+                        || lower_key.contains("secret")
+                        || lower_key.contains("token")
+                        || lower_key.contains("key")
+                    {
+                        Value::String("******".into())
+                    } else {
+                        redact_sensitive_json(value)
+                    };
+                    (key.clone(), redacted_value)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(redact_sensitive_json).collect()),
+        Value::String(text) => Value::String(redact_sensitive_text(text)),
+        _ => value.clone(),
+    }
+}
+
+async fn execute_workspace_command(workspace: &Path, input: &Value) -> Value {
+    let command = value_str(input, "command").unwrap_or("").trim();
+    if command.is_empty() {
+        return json!({
+            "ok": false,
+            "error": "缺少 command 参数。"
+        });
+    }
+    if let Some(reason) = command_risk_reason(command) {
+        return json!({
+            "ok": false,
+            "blocked": true,
+            "risk": "high",
+            "reason": reason,
+            "command": command
+        });
+    }
+    let timeout_seconds = input
+        .get("timeoutSeconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(30)
+        .clamp(1, 30);
+
+    let mut child = Command::new("sh");
+    child
+        .arg("-lc")
+        .arg(command)
+        .current_dir(workspace)
+        .kill_on_drop(true);
+
+    match timeout(
+        std::time::Duration::from_secs(timeout_seconds),
+        child.output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            json!({
+                "ok": output.status.success(),
+                "command": command,
+                "cwd": workspace.to_string_lossy(),
+                "exitCode": output.status.code(),
+                "stdout": truncate_output(&stdout, MAX_COMMAND_OUTPUT_LENGTH),
+                "stderr": truncate_output(&stderr, MAX_COMMAND_OUTPUT_LENGTH),
+                "timedOut": false
+            })
+        }
+        Ok(Err(error)) => json!({
+            "ok": false,
+            "command": command,
+            "cwd": workspace.to_string_lossy(),
+            "error": error.to_string(),
+            "timedOut": false
+        }),
+        Err(_) => json!({
+            "ok": false,
+            "command": command,
+            "cwd": workspace.to_string_lossy(),
+            "error": format!("命令执行超过 {} 秒，已终止。", timeout_seconds),
+            "timedOut": true
+        }),
+    }
+}
+
+async fn execute_ssh_command(input: &Value) -> Value {
+    let host = value_str(input, "host").unwrap_or("").trim();
+    let user = value_str(input, "user").unwrap_or("").trim();
+    let password = value_str(input, "password").unwrap_or("");
+    let remote_command = value_str(input, "command").unwrap_or("").trim();
+    if host.is_empty() || user.is_empty() || remote_command.is_empty() {
+        return json!({
+            "ok": false,
+            "error": "缺少 host、user 或 command 参数。"
+        });
+    }
+    if let Some(reason) = command_risk_reason(remote_command) {
+        return json!({
+            "ok": false,
+            "blocked": true,
+            "risk": "high",
+            "reason": reason,
+            "host": host,
+            "user": user,
+            "command": remote_command
+        });
+    }
+    let timeout_seconds = input
+        .get("timeoutSeconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(60)
+        .clamp(1, 60);
+
+    let output_result = if password.is_empty() {
+        let mut command = Command::new("ssh");
+        command.arg("-o").arg("BatchMode=yes");
+        command
+            .arg("-o")
+            .arg("ConnectTimeout=10")
+            .arg("-o")
+            .arg("StrictHostKeyChecking=accept-new")
+            .arg("-o")
+            .arg("UserKnownHostsFile=/dev/null")
+            .arg("-o")
+            .arg("LogLevel=ERROR")
+            .arg(format!("{}@{}", user, host))
+            .arg("sh")
+            .arg("-lc")
+            .arg(remote_command)
+            .kill_on_drop(true);
+        timeout(
+            std::time::Duration::from_secs(timeout_seconds),
+            command.output(),
+        )
+        .await
+    } else {
+        let mut command = Command::new("sshpass");
+        command
+            .arg("-e")
+            .arg("ssh")
+            .env("SSHPASS", password)
+            .arg("-o")
+            .arg("ConnectTimeout=10")
+            .arg("-o")
+            .arg("StrictHostKeyChecking=accept-new")
+            .arg("-o")
+            .arg("UserKnownHostsFile=/dev/null")
+            .arg("-o")
+            .arg("LogLevel=ERROR")
+            .arg(format!("{}@{}", user, host))
+            .arg("sh")
+            .arg("-lc")
+            .arg(remote_command)
+            .kill_on_drop(true);
+        let sshpass_result = timeout(
+            std::time::Duration::from_secs(timeout_seconds),
+            command.output(),
+        )
+        .await;
+        match sshpass_result {
+            Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                run_expect_ssh_command(host, user, password, remote_command, timeout_seconds).await
+            }
+            other => other,
+        }
+    };
+
+    match output_result {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            json!({
+                "ok": output.status.success(),
+                "host": host,
+                "user": user,
+                "command": remote_command,
+                "exitCode": output.status.code(),
+                "stdout": truncate_output(&stdout, MAX_COMMAND_OUTPUT_LENGTH),
+                "stderr": truncate_output(&stderr, MAX_COMMAND_OUTPUT_LENGTH),
+                "timedOut": false
+            })
+        }
+        Ok(Err(error)) => json!({
+            "ok": false,
+            "host": host,
+            "user": user,
+            "command": remote_command,
+            "error": error.to_string(),
+            "timedOut": false
+        }),
+        Err(_) => json!({
+            "ok": false,
+            "host": host,
+            "user": user,
+            "command": remote_command,
+            "error": format!("SSH 命令执行超过 {} 秒，已终止。", timeout_seconds),
+            "timedOut": true
+        }),
+    }
+}
+
+async fn run_expect_ssh_command(
+    host: &str,
+    user: &str,
+    password: &str,
+    remote_command: &str,
+    timeout_seconds: u64,
+) -> Result<Result<std::process::Output, std::io::Error>, tokio::time::error::Elapsed> {
+    let script = r#"
+set timeout $env(SSH_TIMEOUT)
+spawn -noecho ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR $env(SSH_TARGET) sh -lc $env(SSH_REMOTE_COMMAND)
+expect {
+    -re "(?i)yes/no" {
+        send -- "yes\r"
+        exp_continue
+    }
+    -re "(?i)password:" {
+        send -- "$env(SSH_PASSWORD)\r"
+        exp_continue
+    }
+    timeout {
+        exit 124
+    }
+    eof
+}
+catch wait result
+exit [lindex $result 3]
+"#;
+    let mut command = Command::new("expect");
+    command
+        .arg("-f")
+        .arg("-")
+        .env("SSH_TARGET", format!("{}@{}", user, host))
+        .env("SSH_PASSWORD", password)
+        .env("SSH_REMOTE_COMMAND", remote_command)
+        .env("SSH_TIMEOUT", timeout_seconds.to_string())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    match command.spawn() {
+        Ok(mut child) => {
+            if let Some(mut stdin) = child.stdin.take() {
+                if let Err(error) = stdin.write_all(script.as_bytes()).await {
+                    return Ok(Err(error));
+                }
+            }
+            timeout(
+                std::time::Duration::from_secs(timeout_seconds),
+                child.wait_with_output(),
+            )
+            .await
+        }
+        Err(error) => Ok(Err(error)),
+    }
+}
+
+async fn run_agent_tool_call(
+    app: &AppHandle,
+    run_id: &str,
+    workspace: &Path,
+    tool_call: &Value,
+) -> Value {
+    let tool_call_id = value_str(tool_call, "id").unwrap_or("tool-call");
+    let function = tool_call.get("function").unwrap_or(&Value::Null);
+    let tool_name = value_str(function, "name").unwrap_or("tool");
+    let arguments_text = value_str(function, "arguments").unwrap_or("{}");
+    let arguments = serde_json::from_str::<Value>(arguments_text).unwrap_or_else(|_| json!({}));
+    let safe_arguments = redact_sensitive_json(&arguments);
+    let _ = app.emit(
+        "agent:event",
+        json!({
+            "runId": run_id,
+            "type": "tool-input",
+            "toolCallId": tool_call_id,
+            "toolName": tool_name,
+            "input": safe_arguments
+        }),
+    );
+    let output = match tool_name {
+        "run_command" => execute_workspace_command(workspace, &arguments).await,
+        "run_ssh_command" => execute_ssh_command(&arguments).await,
+        _ => json!({
+            "ok": false,
+            "error": format!("未知工具：{}", tool_name)
+        }),
+    };
+    let safe_output = redact_sensitive_json(&output);
+    let _ = app.emit(
+        "agent:event",
+        json!({
+            "runId": run_id,
+            "type": "tool-output",
+            "toolCallId": tool_call_id,
+            "output": safe_output
+        }),
+    );
+    output
+}
+
 async fn chat_completion(
     provider: &Value,
     model: &str,
@@ -1758,6 +2277,213 @@ async fn chat_completion(
         .and_then(|message| value_str(message, "content"))
         .unwrap_or("")
         .to_string())
+}
+
+async fn chat_completion_with_workspace_tools(
+    app: &AppHandle,
+    run_id: &str,
+    provider: &Value,
+    model: &str,
+    system: &str,
+    mut messages: Vec<Value>,
+    workspace: &Path,
+) -> CommandResult<String> {
+    let provider_id = value_str(provider, "id").unwrap_or("");
+    if provider_id == "provider-ollama" || provider_id == "provider-anthropic" {
+        return chat_completion_stream(app, run_id, provider, model, system, messages).await;
+    }
+
+    let base_url = value_str(provider, "baseUrl")
+        .unwrap_or("")
+        .trim_end_matches('/');
+    let api_key = get_credential("provider", provider_id)?.ok_or_else(|| {
+        CommandError::Message(format!(
+            "{} 尚未配置安全凭据。",
+            value_str(provider, "name").unwrap_or("Provider")
+        ))
+    })?;
+    let client = reqwest::Client::new();
+    let tools = vec![shell_command_tool_definition(), ssh_command_tool_definition()];
+    let mut received_answer = String::new();
+
+    for _ in 0..4 {
+        let response = client
+            .post(format!("{}/chat/completions", base_url))
+            .bearer_auth(&api_key)
+            .json(&json!({
+                "model": model,
+                "messages": std::iter::once(json!({ "role": "system", "content": system }))
+                    .chain(messages.clone().into_iter())
+                    .collect::<Vec<_>>(),
+                "tools": tools,
+                "tool_choice": "auto",
+                "temperature": 0.4,
+                "stream": true
+            }))
+            .send()
+            .await?;
+        let (content, message, tool_calls) = stream_openai_tool_message(
+            app,
+            run_id,
+            ensure_success_response(response).await?,
+        )
+        .await?;
+        received_answer.push_str(&content);
+
+        if tool_calls.is_empty() {
+            return Ok(received_answer);
+        }
+
+        messages.push(message);
+        for tool_call in tool_calls {
+            let output = run_agent_tool_call(app, run_id, workspace, &tool_call).await;
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": value_str(&tool_call, "id").unwrap_or("tool-call"),
+                "content": output.to_string()
+            }));
+        }
+    }
+
+    Err(CommandError::Message(
+        "工具调用轮次过多，已停止以避免循环执行。".into(),
+    ))
+}
+
+#[derive(Default)]
+struct OpenAiToolCallPart {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+async fn stream_openai_tool_message(
+    app: &AppHandle,
+    run_id: &str,
+    response: reqwest::Response,
+) -> CommandResult<(String, Value, Vec<Value>)> {
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut content = String::new();
+    let mut tool_parts: Vec<OpenAiToolCallPart> = Vec::new();
+
+    while let Some(chunk) = stream.next().await {
+        buffer.push_str(&String::from_utf8_lossy(&chunk?));
+
+        while let Some(newline_index) = buffer.find('\n') {
+            let line = buffer[..newline_index].trim().to_string();
+            buffer = buffer[newline_index + 1..].to_string();
+            if line.is_empty() {
+                continue;
+            }
+
+            let payload = line
+                .strip_prefix("data:")
+                .map(str::trim)
+                .unwrap_or(line.as_str());
+            if payload == "[DONE]" {
+                return Ok(build_openai_tool_stream_result(content, tool_parts));
+            }
+
+            let Ok(value) = serde_json::from_str::<Value>(payload) else {
+                continue;
+            };
+            apply_openai_tool_stream_delta(app, run_id, &value, &mut content, &mut tool_parts);
+        }
+    }
+
+    let payload = buffer.trim();
+    if !payload.is_empty() && payload != "[DONE]" {
+        let payload = payload
+            .strip_prefix("data:")
+            .map(str::trim)
+            .unwrap_or(payload);
+        if let Ok(value) = serde_json::from_str::<Value>(payload) {
+            apply_openai_tool_stream_delta(app, run_id, &value, &mut content, &mut tool_parts);
+        }
+    }
+
+    Ok(build_openai_tool_stream_result(content, tool_parts))
+}
+
+fn apply_openai_tool_stream_delta(
+    app: &AppHandle,
+    run_id: &str,
+    value: &Value,
+    content: &mut String,
+    tool_parts: &mut Vec<OpenAiToolCallPart>,
+) {
+    for choice in value
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(delta) = choice.get("delta") else {
+            continue;
+        };
+        if let Some(text) = value_str(delta, "content").filter(|text| !text.is_empty()) {
+            content.push_str(text);
+            emit_agent_text_delta(app, run_id, text);
+        }
+        for tool_call in delta
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let index = tool_call.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+            while tool_parts.len() <= index {
+                tool_parts.push(OpenAiToolCallPart::default());
+            }
+            let part = &mut tool_parts[index];
+            if let Some(id) = value_str(tool_call, "id") {
+                part.id.push_str(id);
+            }
+            if let Some(function) = tool_call.get("function") {
+                if let Some(name) = value_str(function, "name") {
+                    part.name.push_str(name);
+                }
+                if let Some(arguments) = value_str(function, "arguments") {
+                    part.arguments.push_str(arguments);
+                }
+            }
+        }
+    }
+}
+
+fn build_openai_tool_stream_result(
+    content: String,
+    tool_parts: Vec<OpenAiToolCallPart>,
+) -> (String, Value, Vec<Value>) {
+    let tool_calls = tool_parts
+        .into_iter()
+        .filter(|part| !part.id.is_empty() || !part.name.is_empty())
+        .map(|part| {
+            json!({
+                "id": if part.id.is_empty() {
+                    format!("tool-call-{}", uuid::Uuid::new_v4())
+                } else {
+                    part.id
+                },
+                "type": "function",
+                "function": {
+                    "name": part.name,
+                    "arguments": part.arguments
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let message = if tool_calls.is_empty() {
+        json!({ "role": "assistant", "content": content })
+    } else {
+        json!({
+            "role": "assistant",
+            "content": if content.is_empty() { Value::Null } else { Value::String(content.clone()) },
+            "tool_calls": tool_calls
+        })
+    };
+    (content, message, tool_calls)
 }
 
 fn emit_agent_text_delta(app: &AppHandle, run_id: &str, delta: &str) {
@@ -1993,6 +2719,52 @@ fn openclaw_max_delegated_agents(request: &Value) -> usize {
         .clamp(1, 5) as usize
 }
 
+fn is_read_only_ops_prompt(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+    let has_server_target = lower.contains("服务器")
+        || lower.contains("主机")
+        || lower.contains("linux")
+        || lower.contains("ssh")
+        || lower.contains("docker")
+        || lower.contains("k8s")
+        || lower.contains("kubernetes");
+    let has_inspection_goal = [
+        "看一下",
+        "查看",
+        "查询",
+        "检查",
+        "列出",
+        "状态",
+        "运行了哪些",
+        "运行中",
+        "ps",
+        "status",
+        "list",
+        "show",
+        "check",
+        "inspect",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let has_change_intent = [
+        "重启", "删除", "修改", "安装", "更新", "停止", "启动", "部署", "清理", "restart",
+        "delete", "remove", "modify", "install", "update", "stop", "start", "deploy",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+
+    has_server_target && has_inspection_goal && !has_change_intent
+}
+
+fn effective_openclaw_delegate_limit(request: &Value, prompt: &str) -> usize {
+    let configured = openclaw_max_delegated_agents(request);
+    if is_read_only_ops_prompt(prompt) {
+        1
+    } else {
+        configured
+    }
+}
+
 fn openclaw_audit_enabled(request: &Value) -> bool {
     request
         .get("openClawCore")
@@ -2094,11 +2866,12 @@ fn fallback_route_assistants(prompt: &str, candidates: &[Value], limit: usize) -
         .take(limit)
         .collect::<Vec<_>>();
 
-    if selected.is_empty() {
-        candidates.iter().take(1).cloned().collect()
-    } else {
-        selected
-    }
+    selected
+}
+
+struct OpenClawRoute {
+    understanding: Option<String>,
+    agents: Vec<Value>,
 }
 
 async fn route_openclaw_agents(
@@ -2106,11 +2879,14 @@ async fn route_openclaw_agents(
     provider: &Value,
     main_assistant: &Value,
     candidates: &[Value],
-) -> Vec<Value> {
-    let limit = openclaw_max_delegated_agents(request);
+) -> OpenClawRoute {
     let prompt = value_str(request, "prompt").unwrap_or("");
+    let limit = effective_openclaw_delegate_limit(request, prompt);
     if candidates.is_empty() {
-        return Vec::new();
+        return OpenClawRoute {
+            understanding: None,
+            agents: Vec::new(),
+        };
     }
 
     let roster = candidates
@@ -2135,20 +2911,22 @@ async fn route_openclaw_agents(
         .join("\n");
     let system = [
         assistant_system_prompt(main_assistant),
-        "你是内嵌 OpenClaw Core 的 Router。只选择真正需要参与的子 Agent。".to_string(),
-        "只输出 JSON 数组，不要解释。格式：[{\"agentId\":\"assistant-id\",\"reason\":\"简短原因\"}]。"
-            .to_string(),
+        "你是内嵌 OpenClaw Core 的 Router。先理解用户任务，再判断是否需要委派子 Agent。".to_string(),
+        "简单寒暄、闲聊、通用问答、无需专业能力的问题，必须由主 Agent 直接回答，不要委派。".to_string(),
+        "只有任务明显需要某个专业 Agent 的领域能力、工具权限或知识范围时，才选择子 Agent。".to_string(),
+        "只读运维检查、服务状态查询、Docker 容器列表等任务最多委派一个最匹配的运维类 Agent，不要同时选择系统操作助手和运维助手。".to_string(),
+        "只输出 JSON，不要解释。格式：{\"understanding\":\"一句话理解用户目标\",\"agents\":[{\"agentId\":\"assistant-id\",\"reason\":\"简短原因\"}]}。不需要委派时 agents 必须是空数组。".to_string(),
     ]
     .join("\n\n");
     let route_prompt = format!(
-        "用户任务：\n{}\n\n可用子 Agent：\n{}\n\n最多选择 {} 个。若一个专业 Agent 足够，只选择一个。",
+        "用户任务：\n{}\n\n可用子 Agent：\n{}\n\n最多选择 {} 个。若主 Agent 足以回答，返回空 agents。若一个专业 Agent 足够，只选择一个。",
         prompt, roster, limit
     );
 
     let model = value_str(main_assistant, "model")
         .or_else(|| value_str(request, "model"))
         .unwrap_or("");
-    let routed = chat_completion(
+    let route_payload = chat_completion(
         provider,
         model,
         &system,
@@ -2156,23 +2934,46 @@ async fn route_openclaw_agents(
     )
     .await
     .ok()
-    .and_then(|text| extract_json_array_text(&text).map(str::to_string))
-    .and_then(|json_text| serde_json::from_str::<Value>(&json_text).ok())
-    .and_then(|value| value.as_array().cloned())
-    .map(|items| {
-        items
-            .into_iter()
-            .filter_map(|item| value_str(&item, "agentId").map(str::to_string))
-            .filter_map(|id| find_assistant_by_id(candidates, &id))
-            .take(limit)
-            .collect::<Vec<_>>()
-    })
-    .unwrap_or_default();
+    .and_then(|text| {
+        serde_json::from_str::<Value>(&text).ok().or_else(|| {
+            extract_json_array_text(&text)
+                .and_then(|json_text| serde_json::from_str::<Value>(json_text).ok())
+        })
+    });
+
+    let understanding = route_payload
+        .as_ref()
+        .and_then(|value| value_str(value, "understanding"))
+        .map(str::to_string);
+
+    let routed = route_payload
+        .and_then(|value| {
+            if let Some(items) = value.get("agents").and_then(Value::as_array) {
+                Some(items.clone())
+            } else {
+                value.as_array().cloned()
+            }
+        })
+        .map(|items| {
+            items
+                .into_iter()
+                .filter_map(|item| value_str(&item, "agentId").map(str::to_string))
+                .filter_map(|id| find_assistant_by_id(candidates, &id))
+                .take(limit)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
     if routed.is_empty() {
-        fallback_route_assistants(prompt, candidates, limit)
+        OpenClawRoute {
+            understanding,
+            agents: fallback_route_assistants(prompt, candidates, limit),
+        }
     } else {
-        routed
+        OpenClawRoute {
+            understanding,
+            agents: routed,
+        }
     }
 }
 
@@ -2212,11 +3013,13 @@ async fn run_openclaw_embedded_agent(
     main_assistant: Value,
     model: String,
     system: String,
+    workspace: PathBuf,
 ) -> CommandResult<Value> {
     let main_assistant_id = assistant_id(&main_assistant);
     let candidates = candidate_assistants(&request, &main_assistant_id);
-    let selected_agents =
-        route_openclaw_agents(&request, &provider, &main_assistant, &candidates).await;
+    let route = route_openclaw_agents(&request, &provider, &main_assistant, &candidates).await;
+    let selected_agents = route.agents;
+    let selected_agent_count = selected_agents.len();
 
     if selected_agents.is_empty() {
         let answer = chat_completion_stream(
@@ -2229,6 +3032,10 @@ async fn run_openclaw_embedded_agent(
         )
         .await?;
         emit_generated_files_saved(&app, &run_id, &request, &answer).await?;
+        if !answer.trim().is_empty() {
+            let _ =
+                extract_memory_from_conversation(&app, &provider, &model, &request, &answer).await;
+        }
         let _ = app.emit(
             "agent:event",
             json!({ "runId": run_id, "type": "finish", "finishReason": "stop" }),
@@ -2255,7 +3062,12 @@ async fn run_openclaw_embedded_agent(
         &app,
         &run_id,
         &format!(
-            "我将委派给 {}。\n\n",
+            "{}我将委派给 {}。\n\n",
+            route
+                .understanding
+                .filter(|text| !text.trim().is_empty())
+                .map(|text| format!("我理解你的目标是：{}\n\n", text.trim()))
+                .unwrap_or_default(),
             selected_agents
                 .iter()
                 .map(assistant_name)
@@ -2278,38 +3090,72 @@ async fn run_openclaw_embedded_agent(
         let sub_model = value_str(&assistant, "model").unwrap_or("").to_string();
         let sub_system = [
             assistant_system_prompt(&assistant),
-            "你是内嵌 OpenClaw Core 中被 Router 委派的专业 Agent。只完成自己职责范围内的分析或执行建议。"
+            "你是内嵌 OpenClaw Core 中被 Router 委派的专业 Agent。只完成自己职责范围内的分析或执行建议，不得再委派给其他 Agent，也不要输出“我将委派给……”之类的二次委派措辞。"
                 .to_string(),
+            "只读查询任务（df、uptime、docker ps、systemctl status、ls、du 等）不需要二次确认，应直接执行。只有会修改状态的命令才要求确认。".to_string(),
+            "如果你启用了 run_command 或 run_ssh_command 工具，并且用户请求低风险、非交互的本地或远程系统检查，应直接调用工具执行；不要声称当前环境不支持 SSH、不能使用凭据、因为安全限制无法执行，也不要要求用户复制命令自行运行。用户提供的 SSH 密码可用于本次受控连接，但不得在回复中回显、保存或记录。".to_string(),
+            "输出必须精简：不要复述用户目标，不要写安全免责声明，不要写执行计划，不要询问是否执行诊断，不要推荐 PDF/脚本/离线指南。工具成功后只给结论、关键数据和必要下一步；通常不超过 8 行。".to_string(),
         ]
         .join("\n\n");
-        let before = chat_completion(
-            &sub_provider,
-            &sub_model,
-            &sub_system,
-            model_messages(&sub_agent_request(&request, &assistant, None), false),
-        )
-        .await?;
-        emit_agent_text_delta(&app, &run_id, &format!("### {}\n{}\n\n", name, before));
+        let sub_request = sub_agent_request(&request, &assistant, None);
+        let uses_shell_tool = assistant_tool_enabled(&assistant, "tool-shell-command");
+        if uses_shell_tool {
+            emit_agent_text_delta(&app, &run_id, &format!("### {}\n", name));
+        }
+        let before = if uses_shell_tool {
+            chat_completion_with_workspace_tools(
+                &app,
+                &run_id,
+                &sub_provider,
+                &sub_model,
+                &sub_system,
+                model_messages(&sub_request, false),
+                &workspace,
+            )
+            .await?
+        } else {
+            chat_completion(
+                &sub_provider,
+                &sub_model,
+                &sub_system,
+                model_messages(&sub_request, false),
+            )
+            .await?
+        };
+        if uses_shell_tool {
+            emit_agent_text_delta(&app, &run_id, "\n\n");
+        } else {
+            emit_agent_text_delta(&app, &run_id, &format!("### {}\n{}\n\n", name, before));
+        }
         sub_answers.push(format!("## {}\n{}", name, before));
     }
 
-    if !sub_answers.is_empty() {
+    if selected_agent_count > 1 && !sub_answers.is_empty() {
         emit_agent_text_delta(&app, &run_id, "### 汇总\n");
         let summary_context = format!(
-            "以下是 OpenClaw Core 子 Agent 的执行结果，请整合为一个简洁、可执行的最终答复：\n\n{}",
+            "以下是 OpenClaw Core 子 Agent 的执行结果，请只基于这些结果整合为一个极简最终答复。\n重要约束：如果子 Agent 已经调用工具并返回结果，不得声称无法执行、不能使用凭据、无法 SSH 或要求用户复制命令自行运行；只能总结实际结果、失败原因或下一步。不要写安全免责声明、执行计划、确认问题、PDF/脚本/离线指南推荐。最多 8 行。\n\n{}",
             sub_answers.join("\n\n")
         );
         let summary_request = sub_agent_request(&request, &main_assistant, Some(&summary_context));
+        let summary_system = [
+            system.as_str(),
+            "你正在汇总已执行的子 Agent 结果。必须尊重工具结果；不得用通用安全拒绝覆盖已经完成的受控工具调用。不要在回复中回显密码或敏感凭据。输出要短，只保留结论、关键数据和必要下一步。",
+        ]
+        .join("\n\n");
         let answer = chat_completion_stream(
             &app,
             &run_id,
             &provider,
             &model,
-            &system,
+            &summary_system,
             model_messages(&summary_request, false),
         )
         .await?;
         emit_generated_files_saved(&app, &run_id, &request, &answer).await?;
+        if !answer.trim().is_empty() {
+            let _ =
+                extract_memory_from_conversation(&app, &provider, &model, &request, &answer).await;
+        }
     }
 
     let _ = app.emit(
@@ -2364,49 +3210,635 @@ async fn emit_generated_files_saved(
     Ok(())
 }
 
+fn split_by_chars(value: &str, max_chars: usize, max_segments: usize) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    for ch in value.chars() {
+        current.push(ch);
+        if current.chars().count() >= max_chars {
+            segments.push(current.trim().to_string());
+            current.clear();
+            if segments.len() >= max_segments {
+                break;
+            }
+        }
+    }
+    if !current.trim().is_empty() && segments.len() < max_segments {
+        segments.push(current.trim().to_string());
+    }
+    segments
+}
+
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn push_unique_string(items: &mut Vec<Value>, value: &str) {
+    if value.trim().is_empty() {
+        return;
+    }
+    if !items.iter().any(|item| item.as_str() == Some(value)) {
+        items.push(Value::String(value.to_string()));
+    }
+}
+
+fn push_unique_json_string(array: &mut Value, value: &str) {
+    if !array.is_array() {
+        *array = json!([]);
+    }
+    if let Some(items) = array.as_array_mut() {
+        push_unique_string(items, value);
+    }
+}
+
+fn normalize_graph_key(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect()
+}
+
+fn confidence(value: Option<&Value>) -> f64 {
+    value.and_then(Value::as_f64).unwrap_or(0.7).clamp(0.0, 1.0)
+}
+
+fn graph_array_mut<'a>(graph: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
+    if !graph.is_object() {
+        *graph = json!({ "nodes": [], "edges": [], "facts": [] });
+    }
+    let object = graph.as_object_mut().expect("graph object");
+    if !object.get(key).is_some_and(Value::is_array) {
+        object.insert(key.to_string(), json!([]));
+    }
+    object
+        .get_mut(key)
+        .and_then(Value::as_array_mut)
+        .expect("graph array")
+}
+
+fn upsert_graph_node(
+    graph: &mut Value,
+    entity: &Value,
+    file_id: &str,
+    chunk_id: &str,
+) -> Option<String> {
+    let name = value_str(entity, "name")
+        .or_else(|| value_str(entity, "text"))?
+        .trim();
+    if name.is_empty() {
+        return None;
+    }
+    let entity_type = value_str(entity, "type").unwrap_or("概念").trim();
+    let key = format!("{}|{}", normalize_graph_key(name), normalize_graph_key(entity_type));
+    let nodes = graph_array_mut(graph, "nodes");
+    if let Some(node) = nodes.iter_mut().find(|node| {
+        let current_key = format!(
+            "{}|{}",
+            normalize_graph_key(value_str(node, "name").unwrap_or("")),
+            normalize_graph_key(value_str(node, "type").unwrap_or("概念"))
+        );
+        current_key == key
+    }) {
+        let id = value_str(node, "id").unwrap_or("").to_string();
+        let missing_description = value_str(node, "description").unwrap_or("").is_empty();
+        if let Some(object) = node.as_object_mut() {
+            if missing_description {
+                if let Some(description) = value_str(entity, "description") {
+                    object.insert("description".into(), Value::String(description.to_string()));
+                }
+            }
+            let aliases = object.entry("aliases").or_insert_with(|| json!([]));
+            for alias in string_array(entity.get("aliases")) {
+                push_unique_json_string(aliases, &alias);
+            }
+            push_unique_json_string(
+                object.entry("sourceFileIds").or_insert_with(|| json!([])),
+                file_id,
+            );
+            push_unique_json_string(
+                object.entry("sourceChunkIds").or_insert_with(|| json!([])),
+                chunk_id,
+            );
+        }
+        return Some(id);
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    nodes.push(json!({
+        "id": id,
+        "name": name,
+        "type": if entity_type.is_empty() { "概念" } else { entity_type },
+        "aliases": string_array(entity.get("aliases")),
+        "description": value_str(entity, "description").unwrap_or(""),
+        "sourceFileIds": [file_id],
+        "sourceChunkIds": [chunk_id]
+    }));
+    Some(id)
+}
+
+fn upsert_graph_edge(
+    graph: &mut Value,
+    relation: &Value,
+    entity_ids: &HashMap<String, String>,
+    file_id: &str,
+    chunk_id: &str,
+) {
+    let source_name = value_str(relation, "source")
+        .or_else(|| value_str(relation, "from"))
+        .unwrap_or("");
+    let target_name = value_str(relation, "target")
+        .or_else(|| value_str(relation, "to"))
+        .unwrap_or("");
+    let relation_name = value_str(relation, "relation")
+        .or_else(|| value_str(relation, "predicate"))
+        .unwrap_or("")
+        .trim();
+    if source_name.trim().is_empty() || target_name.trim().is_empty() || relation_name.is_empty()
+    {
+        return;
+    }
+    let Some(source_id) = entity_ids.get(&normalize_graph_key(source_name)).cloned() else {
+        return;
+    };
+    let Some(target_id) = entity_ids.get(&normalize_graph_key(target_name)).cloned() else {
+        return;
+    };
+    if source_id == target_id {
+        return;
+    }
+    let key = format!("{}|{}|{}", source_id, target_id, normalize_graph_key(relation_name));
+    let edges = graph_array_mut(graph, "edges");
+    if let Some(edge) = edges.iter_mut().find(|edge| {
+        format!(
+            "{}|{}|{}",
+            value_str(edge, "sourceNodeId").unwrap_or(""),
+            value_str(edge, "targetNodeId").unwrap_or(""),
+            normalize_graph_key(value_str(edge, "relation").unwrap_or(""))
+        ) == key
+    }) {
+        let missing_description = value_str(edge, "description").unwrap_or("").is_empty();
+        if let Some(object) = edge.as_object_mut() {
+            let current_confidence = object
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            object.insert(
+                "confidence".into(),
+                json!(current_confidence.max(confidence(relation.get("confidence")))),
+            );
+            if missing_description {
+                if let Some(description) = value_str(relation, "description") {
+                    object.insert("description".into(), Value::String(description.to_string()));
+                }
+            }
+            push_unique_json_string(
+                object.entry("sourceFileIds").or_insert_with(|| json!([])),
+                file_id,
+            );
+            push_unique_json_string(
+                object.entry("sourceChunkIds").or_insert_with(|| json!([])),
+                chunk_id,
+            );
+        }
+        return;
+    }
+    edges.push(json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "sourceNodeId": source_id,
+        "targetNodeId": target_id,
+        "relation": relation_name,
+        "description": value_str(relation, "description").unwrap_or(""),
+        "confidence": confidence(relation.get("confidence")),
+        "sourceFileIds": [file_id],
+        "sourceChunkIds": [chunk_id]
+    }));
+}
+
+fn upsert_graph_fact(
+    graph: &mut Value,
+    fact: &Value,
+    entity_ids: &HashMap<String, String>,
+    file_id: &str,
+    chunk_id: &str,
+) {
+    let subject_name = value_str(fact, "subject").unwrap_or("");
+    let predicate = value_str(fact, "predicate").unwrap_or("").trim();
+    let fact_value = value_str(fact, "value").unwrap_or("").trim();
+    if predicate.is_empty() || fact_value.is_empty() {
+        return;
+    }
+    let subject_id = entity_ids.get(&normalize_graph_key(subject_name)).cloned();
+    let key = format!(
+        "{}|{}|{}",
+        subject_id.as_deref().unwrap_or(""),
+        normalize_graph_key(predicate),
+        normalize_graph_key(fact_value)
+    );
+    let facts = graph_array_mut(graph, "facts");
+    if let Some(existing) = facts.iter_mut().find(|existing| {
+        format!(
+            "{}|{}|{}",
+            value_str(existing, "subjectNodeId").unwrap_or(""),
+            normalize_graph_key(value_str(existing, "predicate").unwrap_or("")),
+            normalize_graph_key(value_str(existing, "value").unwrap_or(""))
+        ) == key
+    }) {
+        if let Some(object) = existing.as_object_mut() {
+            let current_confidence = object
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            object.insert(
+                "confidence".into(),
+                json!(current_confidence.max(confidence(fact.get("confidence")))),
+            );
+            push_unique_json_string(
+                object.entry("sourceFileIds").or_insert_with(|| json!([])),
+                file_id,
+            );
+            push_unique_json_string(
+                object.entry("sourceChunkIds").or_insert_with(|| json!([])),
+                chunk_id,
+            );
+        }
+        return;
+    }
+    let mut item = json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "predicate": predicate,
+        "value": fact_value,
+        "confidence": confidence(fact.get("confidence")),
+        "sourceFileIds": [file_id],
+        "sourceChunkIds": [chunk_id]
+    });
+    if let Some(subject_id) = subject_id {
+        if let Some(object) = item.as_object_mut() {
+            object.insert("subjectNodeId".into(), Value::String(subject_id));
+        }
+    }
+    facts.push(item);
+}
+
+fn heuristic_entities(text: &str, file_name: &str) -> Vec<Value> {
+    let mut names = Vec::new();
+    names.push(file_name.to_string());
+    for token in text.split(|ch: char| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                ',' | '.'
+                    | ';'
+                    | ':'
+                    | '!'
+                    | '?'
+                    | '('
+                    | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '，'
+                    | '。'
+                    | '；'
+                    | '：'
+                    | '！'
+                    | '？'
+                    | '、'
+                    | '（'
+                    | '）'
+                    | '《'
+                    | '》'
+            )
+    }) {
+        let token = token.trim();
+        let chars = token.chars().count();
+        if (2..=24).contains(&chars)
+            && (token.chars().any(|ch| ch.is_ascii_uppercase())
+                || token.ends_with("系统")
+                || token.ends_with("平台")
+                || token.ends_with("模块")
+                || token.ends_with("流程")
+                || token.ends_with("策略")
+                || token.ends_with("规范")
+                || token.ends_with("制度"))
+            && !names.iter().any(|name| name == token)
+        {
+            names.push(token.to_string());
+        }
+        if names.len() >= 8 {
+            break;
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            json!({
+                "name": name,
+                "type": "概念",
+                "aliases": [],
+                "description": ""
+            })
+        })
+        .collect()
+}
+
+fn fallback_keywords(text: &str, file_name: &str) -> Vec<String> {
+    let mut keywords = Vec::new();
+    for item in [file_name]
+        .into_iter()
+        .chain(text.split(|ch: char| !ch.is_alphanumeric() && ch != '_' && ch != '-'))
+    {
+        let item = item.trim();
+        if item.chars().count() >= 2 && item.chars().count() <= 24 {
+            let key = item.to_lowercase();
+            if !keywords.iter().any(|keyword| keyword == &key) {
+                keywords.push(key);
+            }
+        }
+        if keywords.len() >= 12 {
+            break;
+        }
+    }
+    keywords
+}
+
 fn simple_knowledge_index(request: &Value) -> Value {
     let content = value_str(request, "contentText").unwrap_or("");
     let file_id = value_str(request, "fileId").unwrap_or("file");
     let file_name = value_str(request, "fileName").unwrap_or("文档");
+    let mut graph = request
+        .get("existingGraph")
+        .cloned()
+        .unwrap_or_else(|| json!({ "nodes": [], "edges": [], "facts": [] }));
     let mut chunks = Vec::new();
-    for (index, chunk) in content
-        .as_bytes()
-        .chunks(6000)
-        .take(12)
-        .enumerate()
-        .map(|(index, bytes)| (index, String::from_utf8_lossy(bytes).to_string()))
+    for (index, chunk) in split_by_chars(
+        content,
+        KNOWLEDGE_FALLBACK_CHUNK_CHARS,
+        KNOWLEDGE_INDEX_MAX_SEGMENTS * 2,
+    )
+    .into_iter()
+    .enumerate()
     {
         let trimmed = chunk.trim().to_string();
         if trimmed.is_empty() {
             continue;
         }
+        let chunk_id = uuid::Uuid::new_v4().to_string();
+        let entities = heuristic_entities(&trimmed, file_name);
+        let mut entity_ids = HashMap::new();
+        for entity in &entities {
+            if let Some(id) = upsert_graph_node(&mut graph, entity, file_id, &chunk_id) {
+                if let Some(name) = value_str(entity, "name") {
+                    entity_ids.insert(normalize_graph_key(name), id);
+                }
+            }
+        }
+        let attached_entity_ids = entity_ids.values().cloned().collect::<Vec<_>>();
         chunks.push(json!({
-            "id": uuid::Uuid::new_v4().to_string(),
+            "id": chunk_id,
             "sourceFileId": file_id,
             "content": trimmed,
-            "tokenCount": chunk.chars().count() / 2 + 1,
+            "tokenCount": trimmed.chars().count() / 2 + 1,
             "title": if index == 0 { file_name.to_string() } else { format!("{} 片段 {}", file_name, index + 1) },
-            "summary": chunk.lines().find(|line| !line.trim().is_empty()).unwrap_or("").chars().take(180).collect::<String>(),
-            "keywords": [],
-            "entityIds": []
+            "summary": trimmed.lines().find(|line| !line.trim().is_empty()).unwrap_or("").chars().take(180).collect::<String>(),
+            "keywords": fallback_keywords(&trimmed, file_name),
+            "entityIds": attached_entity_ids
         }));
     }
     if chunks.is_empty() {
+        let chunk_id = uuid::Uuid::new_v4().to_string();
+        let entity_id = upsert_graph_node(
+            &mut graph,
+            &json!({ "name": file_name, "type": "文档", "aliases": [], "description": "" }),
+            file_id,
+            &chunk_id,
+        );
         chunks.push(json!({
-            "id": uuid::Uuid::new_v4().to_string(),
+            "id": chunk_id,
             "sourceFileId": file_id,
             "content": content,
             "tokenCount": 1,
             "title": file_name,
             "summary": "",
-            "keywords": [],
-            "entityIds": []
+            "keywords": fallback_keywords(content, file_name),
+            "entityIds": entity_id.into_iter().collect::<Vec<_>>()
         }));
     }
     json!({
         "chunks": chunks,
-        "graph": request.get("existingGraph").cloned().unwrap_or_else(|| json!({ "nodes": [], "edges": [], "facts": [] }))
+        "graph": graph
     })
+}
+
+fn extract_json_object_text(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    (end > start).then(|| &text[start..=end])
+}
+
+fn parse_knowledge_index_response(text: &str) -> Option<Value> {
+    serde_json::from_str::<Value>(strip_json_fence(text))
+        .ok()
+        .or_else(|| {
+            extract_json_object_text(text).and_then(|json_text| serde_json::from_str(json_text).ok())
+        })
+}
+
+fn merge_knowledge_index_payload(
+    payload: &Value,
+    request: &Value,
+    existing_graph: Value,
+    fallback_segments: &[String],
+) -> Value {
+    let file_id = value_str(request, "fileId").unwrap_or("file");
+    let file_name = value_str(request, "fileName").unwrap_or("文档");
+    let mut graph = existing_graph;
+    let mut chunks = Vec::new();
+    let source_chunks = payload
+        .get("chunks")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    for (index, source_chunk) in source_chunks.iter().enumerate() {
+        let content = value_str(source_chunk, "content")
+            .or_else(|| value_str(source_chunk, "text"))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| fallback_segments.get(index).cloned())
+            .unwrap_or_default();
+        if content.trim().is_empty() {
+            continue;
+        }
+        let chunk_id = uuid::Uuid::new_v4().to_string();
+        let mut entity_ids_by_name = HashMap::new();
+        for entity in source_chunk
+            .get("entities")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(id) = upsert_graph_node(&mut graph, entity, file_id, &chunk_id) {
+                if let Some(name) = value_str(entity, "name").or_else(|| value_str(entity, "text")) {
+                    entity_ids_by_name.insert(normalize_graph_key(name), id);
+                }
+            }
+        }
+        for relation in source_chunk
+            .get("relations")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            upsert_graph_edge(&mut graph, relation, &entity_ids_by_name, file_id, &chunk_id);
+        }
+        for fact in source_chunk
+            .get("facts")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            upsert_graph_fact(&mut graph, fact, &entity_ids_by_name, file_id, &chunk_id);
+        }
+        let keywords = string_array(source_chunk.get("keywords"));
+        chunks.push(json!({
+            "id": chunk_id,
+            "sourceFileId": file_id,
+            "content": content,
+            "tokenCount": content.chars().count() / 2 + 1,
+            "title": value_str(source_chunk, "title")
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| if index == 0 { file_name.to_string() } else { format!("{} 片段 {}", file_name, index + 1) }),
+            "summary": value_str(source_chunk, "summary").unwrap_or("").chars().take(260).collect::<String>(),
+            "keywords": if keywords.is_empty() { fallback_keywords(&content, file_name) } else { keywords },
+            "entityIds": entity_ids_by_name.values().cloned().collect::<Vec<_>>()
+        }));
+    }
+
+    if chunks.is_empty() {
+        return simple_knowledge_index(request);
+    }
+
+    json!({ "chunks": chunks, "graph": graph })
+}
+
+async fn llm_knowledge_index(request: &Value) -> CommandResult<Value> {
+    let provider = request
+        .get("provider")
+        .cloned()
+        .ok_or_else(|| CommandError::Message("缺少知识图谱生成 Provider。".into()))?;
+    let model = value_str(request, "model").unwrap_or("");
+    let content = value_str(request, "contentText").unwrap_or("");
+    let file_name = value_str(request, "fileName").unwrap_or("文档");
+    let segments = split_by_chars(
+        content,
+        KNOWLEDGE_INDEX_SEGMENT_CHARS,
+        KNOWLEDGE_INDEX_MAX_SEGMENTS,
+    );
+    if segments.is_empty() {
+        return Ok(simple_knowledge_index(request));
+    }
+
+    let mut graph = request
+        .get("existingGraph")
+        .cloned()
+        .unwrap_or_else(|| json!({ "nodes": [], "edges": [], "facts": [] }));
+    let mut all_chunks = Vec::new();
+    let system = "你是知识库索引器。请只输出 JSON，不要解释。目标是把文档分成可检索知识块，并抽取实体、关系和事实用于知识图谱。所有关系和事实必须来自原文证据，不能臆造。";
+
+    for (index, segment) in segments.iter().enumerate() {
+        let prompt = format!(
+            r#"文档名：{file_name}
+批次：{}/{}
+
+请从下面正文生成结构化索引，返回 JSON：
+{{
+  "chunks": [
+    {{
+      "title": "知识块标题",
+      "summary": "不超过120字摘要",
+      "content": "保留原文证据，可适度整理但不要添加原文没有的信息",
+      "keywords": ["关键词"],
+      "entities": [{{"name":"实体名","type":"人物/组织/产品/系统/概念/指标/时间/地点/文档","aliases":[],"description":"原文支持的简短说明"}}],
+      "relations": [{{"source":"实体名","target":"实体名","relation":"关系动词或短语","description":"证据说明","confidence":0.0}}],
+      "facts": [{{"subject":"实体名","predicate":"属性或结论","value":"事实值","confidence":0.0}}]
+    }}
+  ]
+}}
+
+要求：
+- 每批生成 2 到 6 个 chunks。
+- content 必须是这批正文中的信息，适合回注给 Agent 作为证据。
+- entities 中的名称要稳定、短，不要把整句当实体。
+- relations/facts 只引用 entities 中出现的实体名。
+
+正文：
+{}"#,
+            index + 1,
+            segments.len(),
+            segment
+        );
+        let answer = chat_completion(
+            &provider,
+            model,
+            system,
+            vec![json!({ "role": "user", "content": prompt })],
+        )
+        .await?;
+        let Some(payload) = parse_knowledge_index_response(&answer) else {
+            return Err(CommandError::Message("模型没有返回可解析的知识图谱 JSON。".into()));
+        };
+        let partial = merge_knowledge_index_payload(
+            &payload,
+            request,
+            graph,
+            std::slice::from_ref(segment),
+        );
+        graph = partial
+            .get("graph")
+            .cloned()
+            .unwrap_or_else(|| json!({ "nodes": [], "edges": [], "facts": [] }));
+        all_chunks.extend(
+            partial
+                .get("chunks")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .cloned(),
+        );
+    }
+
+    if all_chunks.is_empty() {
+        Ok(simple_knowledge_index(request))
+    } else {
+        Ok(json!({ "chunks": all_chunks, "graph": graph }))
+    }
+}
+
+async fn build_knowledge_index(request: &Value) -> Value {
+    match llm_knowledge_index(request).await {
+        Ok(result) => result,
+        Err(error) => {
+            let mut fallback = simple_knowledge_index(request);
+            if let Some(object) = fallback.as_object_mut() {
+                object.insert(
+                    "warning".into(),
+                    Value::String(format!("LLM 知识图谱生成失败，已使用本地索引兜底：{}", error)),
+                );
+            }
+            fallback
+        }
+    }
 }
 
 async fn memory_path(app: &AppHandle) -> CommandResult<PathBuf> {
@@ -2424,6 +3856,7 @@ async fn load_memory(app: &AppHandle) -> CommandResult<Value> {
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .unwrap_or_else(|| json!({ "facts": [], "relations": [], "emails": [] }));
+    normalize_memory_profile(&mut profile);
     if let Some(emails) = profile.get_mut("emails").and_then(Value::as_array_mut) {
         for email in emails {
             let address = value_str(email, "address").unwrap_or("").to_string();
@@ -2434,6 +3867,434 @@ async fn load_memory(app: &AppHandle) -> CommandResult<Value> {
         }
     }
     Ok(profile)
+}
+
+fn fact_value(profile: &Value, predicate: &str) -> Option<String> {
+    profile
+        .get("facts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|fact| value_str(fact, "predicate") == Some(predicate))
+        .and_then(|fact| value_str(fact, "value"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn is_ipv4_address(value: &str) -> bool {
+    let parts = value.trim().split('.').collect::<Vec<_>>();
+    parts.len() == 4
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.parse::<u8>().is_ok())
+}
+
+fn should_skip_memory_fact(predicate: &str, value: &str) -> bool {
+    let predicate = predicate.trim().to_ascii_lowercase();
+    let value = value.trim();
+    if value.is_empty() {
+        return true;
+    }
+
+    let blocked_predicates = [
+        "password",
+        "passwd",
+        "secret",
+        "api_key",
+        "apikey",
+        "access_token",
+        "token",
+        "filename",
+        "file_name",
+        "file path",
+        "filepath",
+        "generated_file",
+        "generated_filename",
+        "working_directory",
+        "workspace_directory",
+        "workdir",
+        "cwd",
+        "pwd",
+        "server_ip",
+        "host_ip",
+        "ip_address",
+        "文件名",
+        "生成文件",
+        "工作目录",
+        "工作区目录",
+        "服务器ip",
+        "服务器 ip",
+        "主机ip",
+        "主机 ip",
+    ];
+    if blocked_predicates
+        .iter()
+        .any(|blocked| predicate.contains(blocked))
+    {
+        return true;
+    }
+
+    let looks_like_server_ip = is_ipv4_address(value)
+        && ["server", "host", "服务器", "主机", "ip"]
+            .iter()
+            .any(|marker| predicate.contains(marker));
+    looks_like_server_ip
+}
+
+fn normalize_memory_profile(profile: &mut Value) {
+    if !profile.is_object() {
+        *profile = json!({});
+    }
+    let object = profile
+        .as_object_mut()
+        .expect("memory profile is an object");
+    if !object.get("facts").is_some_and(Value::is_array) {
+        object.insert("facts".into(), json!([]));
+    }
+    if !object.get("relations").is_some_and(Value::is_array) {
+        object.insert("relations".into(), json!([]));
+    }
+    if let Some(facts) = object.get_mut("facts").and_then(Value::as_array_mut) {
+        facts.retain(|fact| {
+            let predicate = value_str(fact, "predicate").unwrap_or("");
+            let value = value_str(fact, "value").unwrap_or("");
+            !should_skip_memory_fact(predicate, value)
+        });
+    }
+
+    if let Some(name) = fact_value(profile, "name") {
+        profile
+            .as_object_mut()
+            .unwrap()
+            .insert("userName".into(), Value::String(name));
+    }
+
+    let mut assistant_profile = Map::new();
+    for (predicate, key) in [
+        ("assistant_name", "name"),
+        ("assistant_gender", "gender"),
+        ("assistant_personality", "personality"),
+        ("assistant_tone", "tone"),
+        ("assistant_avatar_data_url", "avatarDataUrl"),
+    ] {
+        if let Some(value) = fact_value(profile, predicate) {
+            assistant_profile.insert(key.into(), Value::String(value));
+        }
+    }
+    if !assistant_profile.is_empty() {
+        profile
+            .as_object_mut()
+            .unwrap()
+            .insert("assistantProfile".into(), Value::Object(assistant_profile));
+    }
+
+    let existing_emails = profile
+        .get("emails")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut email_by_address = Map::new();
+    for email in existing_emails {
+        let address = value_str(&email, "address")
+            .unwrap_or("")
+            .trim()
+            .to_lowercase();
+        if !address.is_empty() {
+            email_by_address.insert(address, email);
+        }
+    }
+
+    for fact in profile
+        .get("facts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let predicate = value_str(fact, "predicate").unwrap_or("");
+        if !matches!(predicate, "email" | "personal_email" | "work_email") {
+            continue;
+        }
+        let address = value_str(fact, "value").unwrap_or("").trim().to_lowercase();
+        if address.is_empty() {
+            continue;
+        }
+        let email_type = match predicate {
+            "personal_email" => "personal",
+            "work_email" => "work",
+            _ => "unknown",
+        };
+        let mut email = email_by_address
+            .remove(&address)
+            .unwrap_or_else(|| json!({}))
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        email.insert("address".into(), Value::String(address.clone()));
+        email.insert("type".into(), Value::String(email_type.into()));
+        email.insert(
+            "sourceFactId".into(),
+            Value::String(value_str(fact, "id").unwrap_or("").into()),
+        );
+        email.insert("sourcePredicate".into(), Value::String(predicate.into()));
+        email_by_address.insert(address, Value::Object(email));
+    }
+
+    let emails = email_by_address
+        .into_iter()
+        .map(|(_, email)| email)
+        .collect::<Vec<_>>();
+    profile
+        .as_object_mut()
+        .unwrap()
+        .insert("emails".into(), Value::Array(emails));
+}
+
+fn memory_system_context(profile: &Value) -> Option<String> {
+    let mut sections = Vec::new();
+
+    if let Some(name) = value_str(profile, "userName") {
+        sections.push(format!("用户姓名：{}", name));
+    }
+
+    let facts = profile
+        .get("facts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|fact| {
+            let predicate = value_str(fact, "predicate")?;
+            let value = value_str(fact, "value")?.trim();
+            if predicate == "assistant_avatar_data_url" || should_skip_memory_fact(predicate, value)
+            {
+                return None;
+            }
+            Some(format!("- {}：{}", predicate, value))
+        })
+        .collect::<Vec<_>>();
+    if !facts.is_empty() {
+        sections.push(format!("已知个人信息：\n{}", facts.join("\n")));
+    }
+
+    let relations = profile
+        .get("relations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|relation| {
+            let target = value_str(relation, "targetName")?;
+            let relation_type = value_str(relation, "relationType").unwrap_or("related_to");
+            Some(format!("- {}：{}", relation_type, target))
+        })
+        .collect::<Vec<_>>();
+    if !relations.is_empty() {
+        sections.push(format!("人物关系：\n{}", relations.join("\n")));
+    }
+
+    let emails = profile
+        .get("emails")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|email| {
+            let address = value_str(email, "address")?;
+            let email_type = value_str(email, "type").unwrap_or("unknown");
+            Some(format!("- {} ({})", address, email_type))
+        })
+        .collect::<Vec<_>>();
+    if !emails.is_empty() {
+        sections.push(format!("邮箱账号（不含凭据）：\n{}", emails.join("\n")));
+    }
+
+    let assistant_profile = profile.get("assistantProfile");
+    let assistant_parts = [
+        (
+            "名称",
+            assistant_profile.and_then(|item| value_str(item, "name")),
+        ),
+        (
+            "性别",
+            assistant_profile.and_then(|item| value_str(item, "gender")),
+        ),
+        (
+            "性格",
+            assistant_profile.and_then(|item| value_str(item, "personality")),
+        ),
+        (
+            "语气",
+            assistant_profile.and_then(|item| value_str(item, "tone")),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(label, value)| value.map(|value| format!("- {}：{}", label, value)))
+    .collect::<Vec<_>>();
+    if !assistant_parts.is_empty() {
+        sections.push(format!(
+            "用户设置的 AI 助理画像：\n{}",
+            assistant_parts.join("\n")
+        ));
+    }
+
+    if sections.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "以下是长期记忆。请在相关时主动使用这些信息，保持称呼、语气和偏好一致；不要泄露或臆造未记录的信息。\n{}",
+        sections.join("\n\n")
+    ))
+}
+
+fn strip_json_fence(text: &str) -> &str {
+    let trimmed = text.trim();
+    if let Some(stripped) = trimmed.strip_prefix("```json") {
+        return stripped.trim().trim_end_matches("```").trim();
+    }
+    if let Some(stripped) = trimmed.strip_prefix("```") {
+        return stripped.trim().trim_end_matches("```").trim();
+    }
+    trimmed
+}
+
+fn upsert_extracted_fact(profile: &mut Value, category: &str, predicate: &str, value: &str) {
+    let value = value.trim();
+    if should_skip_memory_fact(predicate, value) {
+        return;
+    }
+    let facts = profile
+        .as_object_mut()
+        .unwrap()
+        .entry("facts")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .unwrap();
+    if facts.iter().any(|fact| {
+        value_str(fact, "predicate") == Some(predicate)
+            && value_str(fact, "value")
+                .map(|existing| existing.eq_ignore_ascii_case(value))
+                .unwrap_or(false)
+    }) {
+        return;
+    }
+    if matches!(
+        predicate,
+        "name"
+            | "job"
+            | "company"
+            | "location"
+            | "language"
+            | "timezone"
+            | "personal_email"
+            | "work_email"
+            | "email"
+    ) {
+        if let Some(existing) = facts
+            .iter_mut()
+            .find(|fact| value_str(fact, "predicate") == Some(predicate))
+        {
+            *existing = json!({
+                "id": value_str(existing, "id").unwrap_or("").to_string(),
+                "category": category,
+                "predicate": predicate,
+                "value": value,
+                "confidence": 0.86,
+                "importance": 0.72,
+                "updatedAt": now_iso()
+            });
+            return;
+        }
+    }
+    facts.push(json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "category": category,
+        "predicate": predicate,
+        "value": value,
+        "confidence": 0.82,
+        "importance": 0.66,
+        "updatedAt": now_iso()
+    }));
+}
+
+fn upsert_extracted_relation(profile: &mut Value, relation_type: &str, target_name: &str) {
+    let target_name = target_name.trim();
+    if target_name.is_empty() {
+        return;
+    }
+    let source_name = value_str(profile, "userName").unwrap_or("我").to_string();
+    let relations = profile
+        .as_object_mut()
+        .unwrap()
+        .entry("relations")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .unwrap();
+    if relations.iter().any(|relation| {
+        value_str(relation, "relationType") == Some(relation_type)
+            && value_str(relation, "targetName")
+                .map(|existing| existing.eq_ignore_ascii_case(target_name))
+                .unwrap_or(false)
+    }) {
+        return;
+    }
+    relations.push(json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "targetEntityId": uuid::Uuid::new_v4().to_string(),
+        "sourceName": source_name,
+        "relationType": relation_type,
+        "targetName": target_name,
+        "confidence": 0.82
+    }));
+}
+
+async fn extract_memory_from_conversation(
+    app: &AppHandle,
+    provider: &Value,
+    model: &str,
+    request: &Value,
+    answer: &str,
+) -> CommandResult<()> {
+    let prompt = value_str(request, "prompt").unwrap_or("").trim();
+    if prompt.is_empty() {
+        return Ok(());
+    }
+
+    let extraction_prompt = format!(
+        "请从这轮对话中抽取适合长期记忆的稳定事实。只记录用户明确提供的信息；不要记录临时任务、闲聊、猜测、密码、验证码、API Key、银行卡、访问令牌、生成文件名、服务器 IP、主机 IP、工作目录或工作区路径。\n\n用户消息：\n{}\n\n助手回答：\n{}\n\n只输出 JSON，格式：{{\"facts\":[{{\"category\":\"profile|preference|contact|work\",\"predicate\":\"name|job|company|location|language|timezone|preference|personal_email|work_email|email|custom:<中文标签>\",\"value\":\"...\"}}],\"relations\":[{{\"relationType\":\"friend|family|colleague|manager|partner|related_to\",\"targetName\":\"...\"}}]}}。没有可记忆内容时输出 {{\"facts\":[],\"relations\":[]}}。",
+        prompt.chars().take(4000).collect::<String>(),
+        answer.chars().take(2000).collect::<String>()
+    );
+    let extracted = chat_completion(
+        provider,
+        model,
+        "你是长期记忆抽取器。必须只输出严格 JSON，不要解释。",
+        vec![json!({ "role": "user", "content": extraction_prompt })],
+    )
+    .await?;
+    let extracted: Value = serde_json::from_str(strip_json_fence(&extracted))?;
+
+    let mut profile = load_memory(app).await?;
+    for fact in extracted
+        .get("facts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let category = value_str(fact, "category").unwrap_or("profile");
+        let predicate = value_str(fact, "predicate").unwrap_or("custom:备注");
+        let value = value_str(fact, "value").unwrap_or("");
+        upsert_extracted_fact(&mut profile, category, predicate, value);
+    }
+    for relation in extracted
+        .get("relations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let relation_type = value_str(relation, "relationType").unwrap_or("related_to");
+        let target_name = value_str(relation, "targetName").unwrap_or("");
+        upsert_extracted_relation(&mut profile, relation_type, target_name);
+    }
+    normalize_memory_profile(&mut profile);
+    save_memory(app, &profile).await
 }
 
 async fn save_memory(app: &AppHandle, profile: &Value) -> CommandResult<()> {
@@ -2636,7 +4497,7 @@ async fn read_knowledge_source(request: KnowledgeSourceReadRequest) -> CommandRe
 
 #[tauri::command]
 async fn index_knowledge_source(request: Value) -> CommandResult<Value> {
-    Ok(simple_knowledge_index(&request))
+    Ok(build_knowledge_index(&request).await)
 }
 
 #[tauri::command]
@@ -2690,7 +4551,7 @@ async fn start_knowledge_extraction(app: AppHandle, request: Value) -> CommandRe
     if let Some(object) = index_request.as_object_mut() {
         object.insert("contentText".into(), Value::String(content_text.clone()));
     }
-    let index_result = simple_knowledge_index(&index_request);
+    let index_result = build_knowledge_index(&index_request).await;
     let _ = app.emit(
         "knowledge:extraction-event",
         json!({
@@ -2773,33 +4634,65 @@ async fn run_agent(app: AppHandle, request: Value) -> CommandResult<Value> {
     let workspace =
         resolve_workspace_directory(value_str(&request, "workspaceDirectory").map(str::to_string))?;
     let generated_directory = workspace.join(GENERATED_DIRECTORY);
+    let memory_context = load_memory(&app)
+        .await
+        .ok()
+        .and_then(|profile| memory_system_context(&profile));
+    let tool_context = if request_tool_enabled(&request, &assistant, "tool-shell-command") {
+        "你已启用 run_command 和 run_ssh_command 工具。对于用户要求的低风险、非交互本地或远程系统检查，应直接调用工具执行，不需要二次确认；不要声称自己因为安全限制无法执行，也不要要求用户复制命令自行运行。用户提供的 SSH 密码可用于本次受控连接，但不得在回复中回显、保存或记录。输出必须精简：不要复述用户目标，不要写安全免责声明、执行计划、确认问题、PDF/脚本/离线指南推荐；工具成功后只给结论、关键数据和必要下一步。"
+    } else {
+        ""
+    };
     let system = [
         value_str(&assistant, "systemPrompt").unwrap_or("你是 Emphant Studio 中的 AI 助手。"),
+        memory_context.as_deref().unwrap_or(""),
+        tool_context,
         "你运行在 Emphant Studio 的受控工作区中。回答应直接、可靠，必要时说明限制。",
         &format!(
             "当用户要求生成代码、文档或其他可保存文件时，请把每个文件作为独立 fenced code block 输出，并在代码块信息中写明相对路径，例如 ```ts path=src/example.ts 或 ```markdown path=docs/report.md。系统会自动保存到工作目录的 {} 文件夹中。",
             generated_directory.to_string_lossy()
         ),
     ]
+    .into_iter()
+    .filter(|part| !part.trim().is_empty())
+    .collect::<Vec<_>>()
     .join("\n\n");
     if openclaw_core_enabled(&request) && value_str(&request, "routingMode") == Some("main") {
         return run_openclaw_embedded_agent(
-            app, request, run_id, provider, assistant, model, system,
+            app, request, run_id, provider, assistant, model, system, workspace,
         )
         .await;
     }
-    let result = chat_completion_stream(
-        &app,
-        &run_id,
-        &provider,
-        &model,
-        &system,
-        model_messages(&request, false),
-    )
-    .await;
+    let result = if request_tool_enabled(&request, &assistant, "tool-shell-command") {
+        chat_completion_with_workspace_tools(
+            &app,
+            &run_id,
+            &provider,
+            &model,
+            &system,
+            model_messages(&request, false),
+            &workspace,
+        )
+        .await
+    } else {
+        chat_completion_stream(
+            &app,
+            &run_id,
+            &provider,
+            &model,
+            &system,
+            model_messages(&request, false),
+        )
+        .await
+    };
     match result {
         Ok(answer) => {
             emit_generated_files_saved(&app, &run_id, &request, &answer).await?;
+            if !answer.trim().is_empty() {
+                let _ =
+                    extract_memory_from_conversation(&app, &provider, &model, &request, &answer)
+                        .await;
+            }
             let _ = app.emit(
                 "agent:event",
                 json!({ "runId": run_id, "type": "finish", "finishReason": "stop" }),

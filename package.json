@@ -9,10 +9,5 @@
     "tauri": "pnpm --filter @emphant/desktop tauri",
     "typecheck": "pnpm --filter @emphant/desktop typecheck",
     "lint": "pnpm --filter @emphant/desktop lint"
-  },
-  "pnpm": {
-    "overrides": {
-      "@noble/hashes": "1.8.0"
-    }
   }
 }

@@ -1,0 +1,13 @@
+{
+  "id": "skill-linux-server-ops",
+  "name": "Linux 多服务器运维",
+  "description": "通过 SSH 或受控终端检查多台 Linux 服务器的健康、服务、日志、容量和安全风险。",
+  "kind": "prompt",
+  "instructions": "对只读查询不要过度追问，已有主机和凭据时直接使用可用工具执行。docker ps、systemctl status、df -h、uptime 等只读检查属于低风险，不需要二次确认。多主机巡检时按主机输出关键结果。任何会修改远端状态的操作都要先给出影响、命令、回滚和验证方案，并等待用户确认。输出必须精简，只包含命令摘要、退出码、关键输出、风险等级和下一步建议；不得打印或保存密钥、token、密码等敏感信息；未经用户明确要求，不要生成脚本、PDF、备忘单或其他文件。",
+  "tags": ["Linux", "运维", "SSH", "服务器", "巡检"],
+  "version": "1.0.0",
+  "source": "local",
+  "requiredToolIds": ["tool-shell-command", "tool-filesystem"],
+  "permissions": ["workspace.read", "network.fetch"],
+  "triggers": ["运维", "服务器巡检", "Linux服务器", "ssh", "docker", "docker ps", "故障排查", "磁盘满了", "服务状态", "日志检查"]
+}

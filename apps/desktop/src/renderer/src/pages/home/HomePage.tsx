@@ -13,14 +13,11 @@ import {
   PlusSquareOutlined,
   ReloadOutlined,
   RightOutlined,
-  RobotOutlined,
   ToolOutlined,
-  TranslationOutlined,
-  UserOutlined
+  TranslationOutlined
 } from '@ant-design/icons'
 import {
   App,
-  Avatar,
   Button,
   Card,
   Dropdown,
@@ -790,22 +787,6 @@ export const HomePage = () => {
                 memoryProfile?.assistantProfile?.name || message.assistantName || 'AI 助理'
               return (
                 <article key={message.id} className={`message-bubble role-${message.role}`}>
-                  <Avatar
-                    className="message-bubble__avatar"
-                    size={34}
-                    src={
-                      message.role === 'assistant'
-                        ? memoryProfile?.assistantProfile?.avatarDataUrl
-                        : memoryProfile?.avatarDataUrl
-                    }
-                    icon={
-                      message.role === 'assistant' ? (
-                        <RobotOutlined />
-                      ) : (
-                        <UserOutlined />
-                      )
-                    }
-                  />
                   <div className="message-bubble__content">
                     {message.role === 'assistant' && (
                       <header>

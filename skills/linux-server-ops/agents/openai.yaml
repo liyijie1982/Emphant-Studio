@@ -1,0 +1,7 @@
+interface:
+  display_name: "Linux 运维助手"
+  short_description: "批量巡检、诊断并安全管理 Linux 服务器"
+  default_prompt: "Use $linux-server-ops to inspect server health across my Linux fleet and summarize risks."
+
+policy:
+  allow_implicit_invocation: true

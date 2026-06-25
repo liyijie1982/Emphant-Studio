@@ -866,13 +866,6 @@ a {
   font-size: 12px;
 }
 
-.message-bubble__avatar {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  background: rgba(140, 180, 255, 0.18);
-  color: var(--accent-strong);
-}
-
 .message-bubble__content {
   min-width: 0;
   flex: 1 1 auto;

@@ -1,3 +1,14 @@
 packages:
   - apps/*
   - packages/*
+
+allowBuilds:
+  '@swc/core': true
+  esbuild: true
+
+overrides:
+  '@noble/hashes': 1.8.0
+
+onlyBuiltDependencies:
+  - '@swc/core'
+  - esbuild

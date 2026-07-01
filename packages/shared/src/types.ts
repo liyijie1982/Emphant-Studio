@@ -4,12 +4,41 @@ export type AppInfo = {
   version: string
 }
 
+export type SecretVaultStatus = {
+  exists: boolean
+  unlocked: boolean
+  itemCount: number
+}
+
+export type SecretVaultUnlockRequest = {
+  password: string
+}
+
 export type ProviderCapability = 'chat' | 'vision' | 'tools' | 'knowledge'
+
+export type ModelDefaultType = 'llm' | 'embedding' | 'asr' | 'tts' | 'rerank'
+
+export type ProviderAccessType =
+  | 'openai-compatible'
+  | 'ollama'
+  | 'chatgpt'
+  | 'openai'
+  | 'anthropic'
+  | 'deepseek'
+  | 'qwen'
+  | 'moonshot'
+  | 'zhipu'
+  | 'baichuan'
+  | 'minimax'
+  | 'doubao'
 
 export type ProviderConfig = {
   id: string
   name: string
   kind: 'cloud' | 'local'
+  accessType: ProviderAccessType
+  providerKey?: string
+  custom?: boolean
   baseUrl: string
   apiKeyHint: string
   credentialConfigured?: boolean
@@ -24,12 +53,21 @@ export type Assistant = {
   description: string
   providerId: string
   model: string
+  embeddingProviderId?: string
+  embeddingModel?: string
+  asrProviderId?: string
+  asrModel?: string
+  ttsProviderId?: string
+  ttsModel?: string
+  rerankProviderId?: string
+  rerankModel?: string
   systemPrompt: string
   contextLimit: number
   capabilities: string[]
   knowledgeBaseIds: string[]
   enabledToolIds: string[]
   enabledSkillIds?: string[]
+  source?: 'builtin' | 'user' | string
 }
 
 export type SkillKind = 'prompt' | 'code'
@@ -208,6 +246,7 @@ export type KnowledgeBase = {
   chunkCount: number
   status: 'ready' | 'indexing'
   tags: string[]
+  source?: 'builtin' | 'user' | string
   indexedContent?: string
   chunks?: KnowledgeChunk[]
   graph?: KnowledgeGraph
@@ -222,6 +261,12 @@ export type KnowledgeChunk = {
   summary?: string
   keywords?: string[]
   entityIds?: string[]
+  embedding?: number[]
+  embeddingProviderId?: string
+  embeddingModel?: string
+  rerankProviderId?: string
+  rerankModel?: string
+  rerankScore?: number
 }
 
 export type KnowledgeGraphNode = {
@@ -273,6 +318,10 @@ export type McpTool = {
     | 'filesystem-write'
     | 'automation'
     | 'command'
+    | 'database'
+    | 'devops'
+    | 'knowledge'
+    | 'collaboration'
     | 'system'
 }
 
@@ -358,6 +407,10 @@ export type KnowledgeSourceReadRequest = {
 export type KnowledgeIndexRequest = {
   provider: ProviderConfig
   model: string
+  embeddingProvider?: ProviderConfig
+  embeddingModel?: string
+  rerankProvider?: ProviderConfig
+  rerankModel?: string
   fileId: string
   fileName: string
   contentText: string
@@ -374,6 +427,10 @@ export type KnowledgeExtractionRequest = {
   knowledgeBaseId: string
   provider: ProviderConfig
   model: string
+  embeddingProvider?: ProviderConfig
+  embeddingModel?: string
+  rerankProvider?: ProviderConfig
+  rerankModel?: string
   fileId: string
   fileName: string
   mimeType: string
@@ -396,6 +453,24 @@ export type KnowledgeExtractionEvent = {
   completedAt?: string
 }
 
+export type AudioTranscriptionRequest = {
+  provider: ProviderConfig
+  model: string
+  fileName: string
+  mimeType: string
+  bytes: Uint8Array
+  language?: string
+  sampleRate?: number
+}
+
+export type SpeechSynthesisRequest = {
+  provider: ProviderConfig
+  model: string
+  text: string
+  voice?: string
+  format?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm'
+}
+
 export type WorkspaceFileMatch = {
   path: string
   size: number
@@ -414,6 +489,14 @@ export type WorkspaceFileContent = {
 export type WorkspaceSettings = {
   defaultProviderId: string
   defaultModel: string
+  defaultEmbeddingProviderId?: string
+  defaultEmbeddingModel?: string
+  defaultAsrProviderId?: string
+  defaultAsrModel?: string
+  defaultTtsProviderId?: string
+  defaultTtsModel?: string
+  defaultRerankProviderId?: string
+  defaultRerankModel?: string
   defaultWorkingDirectory: string
   restoreWorkspaceOnLaunch: boolean
   useMockResponsesWhenProviderFails: boolean
@@ -442,7 +525,21 @@ export type McpServerConfig = {
   enabled: boolean
   transport: 'http' | 'sse'
   url: string
-  service?: 'generic' | 'firecrawl' | 'todoist' | 'notion' | 'google-workspace'
+  service?:
+    | 'generic'
+    | 'firecrawl'
+    | 'todoist'
+    | 'notion'
+    | 'google-workspace'
+    | 'postgresql'
+    | 'sqlite'
+    | 'mysql'
+    | 'mongodb'
+    | 'clickhouse'
+    | 'docker-k8s'
+    | 'obsidian'
+    | 'feishu'
+    | 'dingtalk'
   preset?: boolean
   docsUrl?: string
   authMode?: 'none' | 'header' | 'oauth'
@@ -519,6 +616,7 @@ export type AgentApprovalResponse = {
 export type AgentRunResult = {
   runId: string
   status: 'completed' | 'awaiting-approval' | 'cancelled' | 'error'
+  errorMessage?: string
 }
 
 export type AgentTopicTitleRequest = {

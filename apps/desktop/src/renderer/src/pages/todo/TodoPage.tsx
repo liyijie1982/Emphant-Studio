@@ -1,6 +1,7 @@
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
+  CopyOutlined,
   DeleteOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -31,11 +32,13 @@ import {
   createTodoItem,
   deleteTodoGroup,
   deleteTodoItem,
+  failTodoExecution,
   runTodoTask,
   selectActiveTodoTaskId,
   selectTodoGroups,
   selectTodoItems,
   setActiveTopic,
+  stopAssistantReplies,
   updateTodoItem
 } from '@/store/workbenchSlice'
 
@@ -167,10 +170,10 @@ export const TodoPage = () => {
   const handleRun = async (item: TodoItem) => {
     try {
       await dispatch(runTodoTask(item.id)).unwrap()
-      void messageApi.success('TODO 已执行完成')
+      void messageApi.success('任务已执行完成')
       navigate('/')
     } catch (error) {
-      void messageApi.error(error instanceof Error ? error.message : 'TODO 启动失败')
+      void messageApi.error(error instanceof Error ? error.message : '任务启动失败')
     }
   }
 
@@ -195,13 +198,38 @@ export const TodoPage = () => {
 
   const handleDeleteTodo = (item: TodoItem) => {
     dispatch(deleteTodoItem(item.id))
-    void messageApi.success('TODO 已删除')
+    void messageApi.success('任务已删除')
+  }
+
+  const handleCancelTodo = async (item: TodoItem) => {
+    if (item.workspaceTopicId) {
+      await dispatch(stopAssistantReplies(item.workspaceTopicId)).unwrap()
+    }
+    dispatch(
+      failTodoExecution({
+        todoId: item.id,
+        errorMessage: '用户已取消本次执行。'
+      })
+    )
+    void messageApi.success('任务执行已取消')
+  }
+
+  const handleDuplicateTodo = (item: TodoItem) => {
+    dispatch(
+      createTodoItem({
+        title: `${item.title} 副本`,
+        description: item.description,
+        taskGroup: item.taskGroup,
+        scheduledAt: item.scheduledAt
+      })
+    )
+    void messageApi.success('任务已复制')
   }
 
   const handleDeleteTaskGroup = (taskGroup: string) => {
     const groupItems = todoItems.filter((item) => item.taskGroup === taskGroup)
     if (groupItems.some((item) => item.status === 'running')) {
-      void messageApi.warning('该任务组中有正在执行的 TODO，暂不能删除')
+      void messageApi.warning('该任务组中有正在执行的任务，暂不能删除')
       return
     }
     dispatch(deleteTodoGroup(taskGroup))
@@ -216,7 +244,7 @@ export const TodoPage = () => {
       <section className="todo-layout">
         <Card className="workspace-panel todo-sidebar" bordered={false}>
           <div className="panel-header todo-sidebar__header">
-            <Typography.Title level={4}>TODO</Typography.Title>
+            <Typography.Title level={4}>任务</Typography.Title>
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -234,7 +262,7 @@ export const TodoPage = () => {
             className="sidebar-list-search"
           />
 
-          <nav className="todo-category-list" aria-label="TODO 任务组">
+          <nav className="todo-category-list" aria-label="任务组">
             {taskGroups.map((taskGroup) => {
               const count = todoItems.filter(
                 (item) => taskGroup === 'all' || item.taskGroup === taskGroup
@@ -269,7 +297,7 @@ export const TodoPage = () => {
                     {canDeleteGroup && (
                       <Popconfirm
                         title={`删除任务组 ${label}？`}
-                        description="该任务组下的 TODO 任务也会一并删除。"
+                        description="该任务组下的任务也会一并删除。"
                         okText="删除"
                         cancelText="取消"
                         okButtonProps={{ danger: true }}
@@ -296,14 +324,14 @@ export const TodoPage = () => {
         <Card className="workspace-panel todo-content" bordered={false}>
           <div className="todo-content__header">
             <div>
-              <Typography.Title level={4}>系统 TODO</Typography.Title>
+              <Typography.Title level={4}>系统任务</Typography.Title>
               <Typography.Text type="secondary">
                 按任务组管理任务，支持定时发送到工作台执行或手动启动。
               </Typography.Text>
             </div>
             {activeTodoTaskId && (
               <Tag color="processing" bordered={false}>
-                工作台正在执行 TODO
+                工作台正在执行任务
               </Tag>
             )}
           </div>
@@ -337,6 +365,14 @@ export const TodoPage = () => {
                         <span>定时执行：{formatDateTime(item.scheduledAt)}</span>
                         {item.completedAt && <span>完成：{formatDateTime(item.completedAt)}</span>}
                       </div>
+                      <div className="todo-item__meta">
+                        <UnorderedListOutlined />
+                        <span>
+                          关联链路：
+                          {item.workspaceTopicId ? `会话 ${item.workspaceTopicId.slice(0, 8)}` : '尚未生成会话'}
+                          {item.workspaceMessageId ? ` · AI 回复 ${item.workspaceMessageId.slice(0, 8)}` : ''}
+                        </span>
+                      </div>
                       {item.resultSummary && (
                         <p className="todo-item__result">{item.resultSummary}</p>
                       )}
@@ -356,27 +392,44 @@ export const TodoPage = () => {
                           onChange={(event) => updateSchedule(item, event.target.value)}
                         />
                       </label>
-                      <Space size={8} className="todo-item__actions">
-                        <Button
-                          icon={<PlayCircleOutlined />}
-                          type="primary"
+	                      <Space size={8} className="todo-item__actions">
+	                        <Button
+	                          icon={<PlayCircleOutlined />}
+	                          type="primary"
                           disabled={
                             item.status === 'completed' ||
                             (Boolean(activeTodoTaskId) && activeTodoTaskId !== item.id)
                           }
-                          loading={item.status === 'running'}
-                          onClick={() => void handleRun(item)}
-                        >
-                          手动执行
-                        </Button>
+	                          loading={item.status === 'running'}
+	                          onClick={() => void handleRun(item)}
+	                        >
+	                          {item.status === 'failed' ? '重试执行' : item.status === 'pending' ? '继续执行' : '手动执行'}
+	                        </Button>
+                        {item.status === 'scheduled' && (
+                          <Button onClick={() => updateSchedule(item, '')}>
+                            暂停定时
+                          </Button>
+                        )}
+                        {item.status === 'running' && (
+                          <Button danger onClick={() => void handleCancelTodo(item)}>
+                            取消执行
+                          </Button>
+                        )}
+	                        <Button
+	                          disabled={!item.workspaceTopicId}
+	                          onClick={() => handleOpenTopic(item)}
+	                        >
+	                          工作台会话
+	                        </Button>
                         <Button
-                          disabled={!item.workspaceTopicId}
-                          onClick={() => handleOpenTopic(item)}
+                          icon={<CopyOutlined />}
+                          disabled={item.status === 'running'}
+                          onClick={() => handleDuplicateTodo(item)}
                         >
-                          工作台任务
+                          复制
                         </Button>
-                        <Popconfirm
-                          title={`删除 TODO ${item.title}？`}
+	                        <Popconfirm
+                          title={`删除任务 ${item.title}？`}
                           description="删除后不会删除已经生成的工作台会话。"
                           okText="删除"
                           cancelText="取消"
@@ -400,7 +453,7 @@ export const TodoPage = () => {
                 {filteredTodoItems.length === 0 && (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="暂无匹配的 TODO"
+                    description="暂无匹配的任务"
                   />
                 )}
               </div>
@@ -411,7 +464,7 @@ export const TodoPage = () => {
 
       <Modal
         open={createOpen}
-        title="新建 TODO"
+        title="新建任务"
         okText="添加任务"
         cancelText="取消"
         onCancel={() => setCreateOpen(false)}

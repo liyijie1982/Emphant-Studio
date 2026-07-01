@@ -1,4 +1,5 @@
 import {
+  ApartmentOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
@@ -16,6 +17,7 @@ import {
 import { nanoid } from '@reduxjs/toolkit'
 import {
   App,
+  Alert,
   Button,
   Card,
   Empty,
@@ -23,7 +25,10 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Progress,
+  Space,
   Tag,
+  Tabs,
   Typography
 } from 'antd'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
@@ -39,9 +44,16 @@ import {
   selectKnowledgeBases,
   selectSettings
 } from '@/store/workbenchSlice'
+import { KnowledgeGraphVisual } from './KnowledgeGraphVisual'
 import type { FileRecord, KnowledgeGraph } from '@emphant/shared/types'
 
 const PROCESSING_STATUSES = new Set(['queued', 'extracting', 'indexing'])
+
+const getSourceLabel = (source?: string) =>
+  source === 'builtin' ? '系统预设' : source === 'user' || !source ? '用户资产' : source
+
+const getSourceTagColor = (source?: string) =>
+  source === 'builtin' ? 'geekblue' : source === 'user' || !source ? 'green' : 'purple'
 
 const readImagePreview = (file: File) =>
   new Promise<string | undefined>((resolve) => {
@@ -115,6 +127,7 @@ export const KnowledgePage = () => {
   const [previewFile, setPreviewFile] = useState<FileRecord | null>(null)
   const [query, setQuery] = useState('')
   const [failureFile, setFailureFile] = useState<FileRecord | null>(null)
+  const [isGraphOpen, setIsGraphOpen] = useState(false)
   const [form] = Form.useForm<{ name: string; description: string }>()
 
   const activeBase = useMemo(
@@ -145,6 +158,51 @@ export const KnowledgePage = () => {
   const isIndexing = activeFiles.some((file) =>
     PROCESSING_STATUSES.has(file.knowledgeStatus ?? '')
   )
+  const graphNodeNames = useMemo(
+    () =>
+      new Map(
+        (activeBase?.graph?.nodes ?? []).map((node) => [node.id, node.name])
+      ),
+    [activeBase?.graph?.nodes]
+  )
+  const hasGraphContent = Boolean(
+    activeBase?.graph &&
+      (activeBase.graph.nodes.length > 0 ||
+        activeBase.graph.edges.length > 0 ||
+        activeBase.graph.facts.length > 0)
+  )
+  const previewChunks = useMemo(
+    () =>
+      previewFile && activeBase?.chunks
+        ? activeBase.chunks.filter((chunk) => chunk.sourceFileId === previewFile.id)
+        : [],
+    [activeBase?.chunks, previewFile]
+  )
+  const previewGraphSources = useMemo(() => {
+    if (!previewFile || !activeBase?.graph) {
+      return { nodes: [], edges: [], facts: [] }
+    }
+    return {
+      nodes: activeBase.graph.nodes.filter((node) =>
+        node.sourceFileIds.includes(previewFile.id)
+      ),
+      edges: activeBase.graph.edges.filter((edge) =>
+        edge.sourceFileIds.includes(previewFile.id)
+      ),
+      facts: activeBase.graph.facts.filter((fact) =>
+        fact.sourceFileIds.includes(previewFile.id)
+      )
+    }
+  }, [activeBase?.graph, previewFile])
+  const indexingProvider = providers.find(
+    (provider) => provider.id === settings.defaultProviderId && provider.enabled
+  )
+  const knowledgeReady = Boolean(settings.defaultWorkingDirectory && indexingProvider)
+  const knowledgeReadinessMessage = !settings.defaultWorkingDirectory
+    ? '请先在设置中选择工作目录，知识会保存到该目录下。'
+    : !indexingProvider
+      ? '请先在设置中启用默认对话模型，导入后才能抽取切片和知识图谱。'
+      : ''
 
   useEffect(() => {
     if (!activeBaseId || !knowledgeBases.some((base) => base.id === activeBaseId)) {
@@ -181,10 +239,21 @@ export const KnowledgePage = () => {
 
   const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!activeBase) return
+    if (!knowledgeReady) {
+      void messageApi.warning(knowledgeReadinessMessage)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      return
+    }
+    if (!indexingProvider) return
 
     const selectedFiles = Array.from(event.target.files ?? [])
-    const indexingProvider = providers.find(
-      (provider) => provider.id === settings.defaultProviderId && provider.enabled
+    const embeddingProvider = providers.find(
+      (provider) => provider.id === settings.defaultEmbeddingProviderId && provider.enabled
+    )
+    const rerankProvider = providers.find(
+      (provider) => provider.id === settings.defaultRerankProviderId && provider.enabled
     )
     const pendingJobs: Array<{
       file: FileRecord
@@ -207,8 +276,8 @@ export const KnowledgePage = () => {
       } catch (error) {
         void messageApi.error(
           error instanceof Error
-            ? `${file.name} 原文件保存失败：${error.message}`
-            : `${file.name} 原文件保存失败`
+            ? `${file.name} 原始资产保存失败：${error.message}`
+            : `${file.name} 原始资产保存失败`
         )
         continue
       }
@@ -236,37 +305,27 @@ export const KnowledgePage = () => {
       try {
         await saveWorkspaceContentNow()
         void messageApi.success(
-          `${pendingJobs.length} 个文件已上传，知识提取将在后台进行`
+          `${pendingJobs.length} 个资产已导入，知识提取将在后台进行`
         )
       } catch (error) {
         void messageApi.error(
-          error instanceof Error
-            ? `文件未能保存到工作目录：${error.message}`
-            : '文件未能保存到工作目录'
+              error instanceof Error
+            ? `资产未能保存到工作目录：${error.message}`
+            : '资产未能保存到工作目录'
         )
       }
 
       for (const { file, bytes } of pendingJobs) {
-        if (!indexingProvider) {
-          dispatch(
-            applyKnowledgeExtractionEvent({
-              jobId: nanoid(),
-              knowledgeBaseId: activeBase.id,
-              fileId: file.id,
-              status: 'failed',
-              progress: 100,
-              error: '默认 Provider 不可用，请在设置中启用后重新生成。',
-              completedAt: new Date().toISOString()
-            })
-          )
-          continue
-        }
         try {
           await window.emphant.startKnowledgeExtraction({
             jobId: nanoid(),
             knowledgeBaseId: activeBase.id,
             provider: indexingProvider,
             model: settings.defaultModel,
+            embeddingProvider,
+            embeddingModel: settings.defaultEmbeddingModel,
+            rerankProvider,
+            rerankModel: settings.defaultRerankModel,
             fileId: file.id,
             fileName: file.name,
             mimeType: file.mimeType,
@@ -301,11 +360,14 @@ export const KnowledgePage = () => {
     sourceBytes?: Uint8Array
   ) => {
     if (!activeBase || PROCESSING_STATUSES.has(file.knowledgeStatus ?? '')) return
-    const indexingProvider = providers.find(
-      (provider) => provider.id === settings.defaultProviderId && provider.enabled
+    const embeddingProvider = providers.find(
+      (provider) => provider.id === settings.defaultEmbeddingProviderId && provider.enabled
     )
-    if (!indexingProvider) {
-      void messageApi.error('默认 Provider 不可用，无法生成知识图谱。')
+    const rerankProvider = providers.find(
+      (provider) => provider.id === settings.defaultRerankProviderId && provider.enabled
+    )
+    if (!knowledgeReady || !indexingProvider) {
+      void messageApi.error(knowledgeReadinessMessage || '默认模型不可用，无法生成知识图谱。')
       return
     }
     if (!file.originalRelativePath) {
@@ -336,6 +398,10 @@ export const KnowledgePage = () => {
         knowledgeBaseId: activeBase.id,
         provider: indexingProvider,
         model: settings.defaultModel,
+        embeddingProvider,
+        embeddingModel: settings.defaultEmbeddingModel,
+        rerankProvider,
+        rerankModel: settings.defaultRerankModel,
         fileId: file.id,
         fileName: file.name,
         mimeType: file.mimeType,
@@ -379,7 +445,7 @@ export const KnowledgePage = () => {
         await startExtraction(entry.file, initialGraph, entry.bytes)
       }
     }
-    void messageApi.info('已提交全部文件的重新生成任务')
+    void messageApi.info('已提交全部资产的重新生成任务')
   }
 
   return (
@@ -387,12 +453,12 @@ export const KnowledgePage = () => {
       <section className="knowledge-workspace">
         <Card className="workspace-panel knowledge-sidebar" variant="borderless">
           <div className="knowledge-panel-header">
-            <Typography.Title level={4}>知识库</Typography.Title>
+            <Typography.Title level={4}>知识</Typography.Title>
             <Button
               type="text"
               className="knowledge-create-button"
               icon={<PlusOutlined />}
-              aria-label="新建知识库"
+              aria-label="新建资产库"
               onClick={() => setIsCreateOpen(true)}
             />
           </div>
@@ -422,16 +488,19 @@ export const KnowledgePage = () => {
                     <span>
                       <strong>{base.name}</strong>
                       <small>
-                        {base.sourceFileIds.length} 个文件 · {base.chunkCount} 个切片
+                        {base.sourceFileIds.length} 个资产 · {base.chunkCount} 个切片
                         {base.graph
                           ? ` · ${base.graph.nodes.length} 个实体 · ${base.graph.edges.length} 条关系`
                           : ''}
                       </small>
+                      <Tag color={getSourceTagColor(base.source)}>
+                        {getSourceLabel(base.source)}
+                      </Tag>
                     </span>
                   </button>
-                  <Popconfirm
-                    title="删除知识库"
-                    description="知识库会被删除，原始文件仍保留在文件管理中。"
+              <Popconfirm
+                title="删除资产库"
+                description="资产库、索引和关联资产会一并移除。"
                     okText="删除"
                     cancelText="取消"
                     okButtonProps={{ danger: true }}
@@ -450,7 +519,7 @@ export const KnowledgePage = () => {
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description={
-                  knowledgeBases.length === 0 ? '还没有知识库' : '没有匹配的知识库'
+                  knowledgeBases.length === 0 ? '还没有资产库' : '没有匹配的资产库'
                 }
               >
                 {knowledgeBases.length === 0 && (
@@ -459,7 +528,7 @@ export const KnowledgePage = () => {
                     icon={<PlusOutlined />}
                     onClick={() => setIsCreateOpen(true)}
                   >
-                    新建知识库
+                    新建资产库
                   </Button>
                 )}
               </Empty>
@@ -473,12 +542,18 @@ export const KnowledgePage = () => {
               <div className="knowledge-files-header">
                 <div>
                   <Typography.Title level={4}>{activeBase.name}</Typography.Title>
-                  <Typography.Text type="secondary">
-                    {activeBase.description || '管理这个知识库中的文件'}
-                    {activeBase.graph
-                      ? ` · 图谱包含 ${activeBase.graph.nodes.length} 个实体、${activeBase.graph.edges.length} 条关系和 ${activeBase.graph.facts.length} 条事实`
-                      : ''}
-                  </Typography.Text>
+	                  <Typography.Text type="secondary">
+	                    {activeBase.description || '在这里统一管理原文、切片、引用和知识图谱'}
+	                    {activeBase.graph
+	                      ? ` · 图谱包含 ${activeBase.graph.nodes.length} 个实体、${activeBase.graph.edges.length} 条关系和 ${activeBase.graph.facts.length} 条事实`
+	                      : ''}
+	                  </Typography.Text>
+                  <div className="knowledge-source-tags">
+                    <Tag color={getSourceTagColor(activeBase.source)}>
+                      {getSourceLabel(activeBase.source)}
+                    </Tag>
+                    <Tag>{activeBase.source === 'builtin' ? '升级合并前保留系统来源' : '保存在用户工作区数据'}</Tag>
+                  </div>
                 </div>
                 <div className="knowledge-files-header__actions">
                   <input
@@ -490,6 +565,13 @@ export const KnowledgePage = () => {
                     onChange={(event) => void handleUpload(event)}
                   />
                   <Button
+                    icon={<ApartmentOutlined />}
+                    disabled={!hasGraphContent}
+                    onClick={() => setIsGraphOpen(true)}
+                  >
+                    查看知识图谱
+                  </Button>
+                  <Button
                     loading={isIndexing}
                     icon={<SyncOutlined />}
                     disabled={activeFiles.length === 0}
@@ -500,13 +582,47 @@ export const KnowledgePage = () => {
                   <Button
                     type="primary"
                     icon={<UploadOutlined />}
-                    disabled={isIndexing}
+                    disabled={isIndexing || !knowledgeReady}
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    上传文件
+                    导入资产
                   </Button>
                 </div>
               </div>
+              {!knowledgeReady && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="knowledge-readiness-alert"
+                  message="知识尚未就绪"
+                  description={
+                    <Space direction="vertical" size={4}>
+                      <span>{knowledgeReadinessMessage}</span>
+                      <span>完成后再导入资产，系统会保存原文、抽取切片，并生成可引用的知识图谱。</span>
+                    </Space>
+                  }
+                />
+              )}
+              {knowledgeReady && (
+                <Alert
+                  type="success"
+                  showIcon
+                  className="knowledge-readiness-alert"
+                  message="导入准备已完成"
+                  description={
+                    <Space direction="vertical" size={4}>
+                      <span>工作目录：{settings.defaultWorkingDirectory}</span>
+	                      <span>
+	                        抽取模型：{indexingProvider?.name} · {settings.defaultModel}
+	                      </span>
+	                      <span>导入后会先保存原始文件，再解析正文、生成切片和知识图谱。</span>
+                      <span>
+                        持久化：原始文件、切片、图谱和引用来源会保存到工作目录；当前运行状态：解析进度、临时预览和错误提示只用于本次导入过程。
+                      </span>
+	                    </Space>
+	                  }
+	                />
+              )}
 
               <div
                 className={
@@ -543,12 +659,29 @@ export const KnowledgePage = () => {
                               </Tag>
                             </span>
                             <small>
-                              {formatFileSize(file.size)} · 上传于{' '}
+                              {formatFileSize(file.size)} · 导入于{' '}
                               {new Date(file.uploadedAt).toLocaleDateString()}
                               {isProcessing
                                 ? ` · ${status.label} ${file.knowledgeProgress ?? 0}%`
                                 : ''}
                             </small>
+                            {file.originalRelativePath && (
+                              <small className="knowledge-file-item__path">
+                                保存位置：{file.originalRelativePath}
+                              </small>
+                            )}
+                            {isProcessing && (
+                              <Progress
+                                percent={file.knowledgeProgress ?? 0}
+                                size="small"
+                                status="active"
+                              />
+                            )}
+                            {file.knowledgeStatus === 'failed' && (
+                              <small className="knowledge-file-item__error">
+                                失败原因：{file.knowledgeError || '未记录失败原因'}
+                              </small>
+                            )}
                           </span>
                         </button>
                         <div className="knowledge-file-item__actions">
@@ -574,8 +707,8 @@ export const KnowledgePage = () => {
                             预览
                           </Button>
                           <Popconfirm
-                            title="移出知识库"
-                            description="原文件仍会保留在文件管理中。"
+                            title="移出资产库"
+                            description="该资产、切片和图谱线索会从当前资产库移除。"
                             okText="移出"
                             cancelText="取消"
                             onConfirm={() =>
@@ -591,7 +724,7 @@ export const KnowledgePage = () => {
                               type="text"
                               danger
                               icon={<DeleteOutlined />}
-                              aria-label="删除文件"
+                              aria-label="移出资产"
                             />
                           </Popconfirm>
                         </div>
@@ -602,26 +735,27 @@ export const KnowledgePage = () => {
                   <Empty
                     className="knowledge-files-empty"
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="这个知识库还没有文件"
+                    description="这个资产库还没有内容"
                   >
-                    <Button
-                      icon={<UploadOutlined />}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      上传第一个文件
-                    </Button>
+                      <Button
+                        icon={<UploadOutlined />}
+                        disabled={!knowledgeReady}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        导入第一个资产
+                      </Button>
                   </Empty>
                 )}
               </div>
             </>
           ) : (
-            <Empty className="knowledge-files-empty" description="新建或选择一个知识库" />
+            <Empty className="knowledge-files-empty" description="新建或选择一个资产库" />
           )}
         </Card>
       </section>
 
       <Modal
-        title="新建知识库"
+        title="新建资产库"
         open={isCreateOpen}
         okText="创建"
         cancelText="取消"
@@ -636,46 +770,262 @@ export const KnowledgePage = () => {
             label="名称"
             name="name"
             rules={[
-              { required: true, whitespace: true, message: '请输入知识库名称' },
+              { required: true, whitespace: true, message: '请输入资产库名称' },
               { max: 40, message: '名称不能超过 40 个字符' }
             ]}
           >
-            <Input autoFocus placeholder="例如：产品需求库" />
+            <Input autoFocus placeholder="例如：产品资料库" />
           </Form.Item>
           <Form.Item label="说明" name="description">
             <Input.TextArea
               autoSize={{ minRows: 3, maxRows: 5 }}
               maxLength={160}
               showCount
-              placeholder="说明这个知识库收录什么内容"
+              placeholder="说明这个资产库收录什么内容"
             />
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        width={760}
+        width={1180}
+        footer={null}
+        title={`${activeBase?.name ?? '资产库'} 知识图谱`}
+        open={isGraphOpen}
+        onCancel={() => setIsGraphOpen(false)}
+      >
+        {activeBase?.graph && hasGraphContent ? (
+          <Tabs
+            defaultActiveKey="visual"
+            items={[
+              {
+                key: 'visual',
+                label: '图像图谱',
+                children: <KnowledgeGraphVisual graph={activeBase.graph} />
+              },
+              {
+                key: 'cards',
+                label: '卡片图谱',
+                children: (
+                  <div className="knowledge-graph-viewer">
+                    <div className="knowledge-graph-stats">
+                      <span>
+                        <strong>{activeBase.graph.nodes.length}</strong>
+                        <small>实体</small>
+                      </span>
+                      <span>
+                        <strong>{activeBase.graph.edges.length}</strong>
+                        <small>关系</small>
+                      </span>
+                      <span>
+                        <strong>{activeBase.graph.facts.length}</strong>
+                        <small>事实</small>
+                      </span>
+                    </div>
+
+                    <div className="knowledge-graph-columns">
+                      <section className="knowledge-graph-section">
+                        <Typography.Title level={5}>实体</Typography.Title>
+                        <div className="knowledge-graph-list">
+                          {activeBase.graph.nodes.map((node) => (
+                            <article key={node.id} className="knowledge-graph-item">
+                              <div className="knowledge-graph-item__title">
+                                <strong>{node.name}</strong>
+                                <Tag>{node.type}</Tag>
+                              </div>
+                              {node.description && <p>{node.description}</p>}
+                              {node.aliases.length > 0 && (
+                                <small>别名：{node.aliases.join('、')}</small>
+                              )}
+                              <small>
+                                来源：{node.sourceFileIds.length} 个资产 ·{' '}
+                                {node.sourceChunkIds.length} 个切片
+                              </small>
+                            </article>
+                          ))}
+                        </div>
+                      </section>
+
+                      <section className="knowledge-graph-section">
+                        <Typography.Title level={5}>关系</Typography.Title>
+                        {activeBase.graph.edges.length > 0 ? (
+                          <div className="knowledge-graph-list">
+                            {activeBase.graph.edges.map((edge) => (
+                              <article key={edge.id} className="knowledge-graph-item">
+                                <div className="knowledge-graph-relation">
+                                  <strong>
+                                    {graphNodeNames.get(edge.sourceNodeId) ?? '未知实体'}
+                                  </strong>
+                                  <Tag color="blue">{edge.relation}</Tag>
+                                  <strong>
+                                    {graphNodeNames.get(edge.targetNodeId) ?? '未知实体'}
+                                  </strong>
+                                </div>
+                                {edge.description && <p>{edge.description}</p>}
+                                <small>
+                                  置信度：{Math.round(edge.confidence * 100)}%
+                                </small>
+                              </article>
+                            ))}
+                          </div>
+                        ) : (
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description="暂无关系"
+                          />
+                        )}
+                      </section>
+
+                      <section className="knowledge-graph-section">
+                        <Typography.Title level={5}>事实</Typography.Title>
+                        {activeBase.graph.facts.length > 0 ? (
+                          <div className="knowledge-graph-list">
+                            {activeBase.graph.facts.map((fact) => (
+                              <article key={fact.id} className="knowledge-graph-item">
+                                <div className="knowledge-graph-item__title">
+                                  <strong>
+                                    {fact.subjectNodeId
+                                      ? graphNodeNames.get(fact.subjectNodeId) ?? '未知实体'
+                                      : '通用事实'}
+                                  </strong>
+                                  <Tag color="geekblue">{fact.predicate}</Tag>
+                                </div>
+                                <p>{fact.value}</p>
+                                <small>
+                                  置信度：{Math.round(fact.confidence * 100)}%
+                                </small>
+                              </article>
+                            ))}
+                          </div>
+                        ) : (
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description="暂无事实"
+                          />
+                        )}
+                      </section>
+                    </div>
+                  </div>
+                )
+              }
+            ]}
+          />
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无知识图谱" />
+        )}
+      </Modal>
+
+      <Modal
+        width={900}
         footer={null}
         title={previewFile?.name}
         open={Boolean(previewFile)}
         onCancel={() => setPreviewFile(null)}
       >
-        <div className="knowledge-preview">
-          {previewFile?.preview ? (
-            <img src={previewFile.preview} alt={previewFile.name} />
-          ) : previewFile?.contentText ? (
-            <pre>{previewFile.contentText}</pre>
-          ) : (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="当前格式暂不支持内容预览"
-            >
-              <Typography.Text type="secondary">
-                {previewFile?.mimeType} · {formatFileSize(previewFile?.size ?? 0)}
-              </Typography.Text>
-            </Empty>
-          )}
-        </div>
+        <Tabs
+          defaultActiveKey="source"
+          items={[
+            {
+              key: 'source',
+              label: '原始内容',
+              children: (
+                <div className="knowledge-preview">
+                  {previewFile?.preview ? (
+                    <img src={previewFile.preview} alt={previewFile.name} />
+                  ) : previewFile?.contentText ? (
+                    <pre>{previewFile.contentText}</pre>
+                  ) : (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="当前格式暂不支持内容预览"
+                    >
+                      <Typography.Text type="secondary">
+                        {previewFile?.mimeType} · {formatFileSize(previewFile?.size ?? 0)}
+                      </Typography.Text>
+                    </Empty>
+                  )}
+                  {previewFile?.originalRelativePath && (
+                    <Typography.Paragraph type="secondary">
+                      原始文件保存位置：{previewFile.originalRelativePath}
+                    </Typography.Paragraph>
+                  )}
+                </div>
+              )
+            },
+            {
+              key: 'chunks',
+              label: `切片 ${previewChunks.length}`,
+              children: previewChunks.length ? (
+                <div className="knowledge-preview-list">
+                  {previewChunks.map((chunk, index) => (
+                    <article key={chunk.id} className="knowledge-preview-card">
+                      <div>
+                        <strong>{chunk.title || `切片 ${index + 1}`}</strong>
+                        <Tag>{chunk.tokenCount} tokens</Tag>
+                      </div>
+                      {chunk.summary && <p>{chunk.summary}</p>}
+                      <pre>{chunk.content}</pre>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无切片" />
+              )
+            },
+            {
+              key: 'references',
+              label: '引用来源',
+              children: (
+                <div className="knowledge-preview-list">
+                  <article className="knowledge-preview-card">
+                    <strong>实体</strong>
+                    {previewGraphSources.nodes.length ? (
+                      <Space wrap>
+                        {previewGraphSources.nodes.map((node) => (
+                          <Tag key={node.id}>{node.name}</Tag>
+                        ))}
+                      </Space>
+                    ) : (
+                      <Typography.Text type="secondary">暂无实体引用</Typography.Text>
+                    )}
+                  </article>
+                  <article className="knowledge-preview-card">
+                    <strong>关系</strong>
+                    {previewGraphSources.edges.length ? (
+                      <Space direction="vertical" size={6}>
+                        {previewGraphSources.edges.map((edge) => (
+                          <Typography.Text key={edge.id}>
+                            {(graphNodeNames.get(edge.sourceNodeId) ?? edge.sourceNodeId)}
+                            {' -> '}
+                            {edge.relation}
+                            {' -> '}
+                            {(graphNodeNames.get(edge.targetNodeId) ?? edge.targetNodeId)}
+                          </Typography.Text>
+                        ))}
+                      </Space>
+                    ) : (
+                      <Typography.Text type="secondary">暂无关系引用</Typography.Text>
+                    )}
+                  </article>
+                  <article className="knowledge-preview-card">
+                    <strong>事实</strong>
+                    {previewGraphSources.facts.length ? (
+                      <Space direction="vertical" size={6}>
+                        {previewGraphSources.facts.map((fact) => (
+                          <Typography.Text key={fact.id}>
+                            {fact.predicate}：{fact.value}
+                          </Typography.Text>
+                        ))}
+                      </Space>
+                    ) : (
+                      <Typography.Text type="secondary">暂无事实引用</Typography.Text>
+                    )}
+                  </article>
+                </div>
+              )
+            }
+          ]}
+        />
       </Modal>
 
       <Modal

@@ -2,7 +2,6 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AgentsPage } from '@/pages/agents'
 import { AppShell } from '@/shell/AppShell'
 import { HomePage } from '@/pages/home/HomePage'
-import { FilesPage } from '@/pages/files/FilesPage'
 import { KnowledgePage } from '@/pages/knowledge/KnowledgePage'
 import { NotesPage } from '@/pages/notes/NotesPage'
 import { ProfilePage, ProfileSettingsPage } from '@/pages/profile'
@@ -15,7 +14,6 @@ export const AppRouter = () => (
     <Route element={<AppShell />}>
       <Route index element={<HomePage />} />
       <Route path="/agents" element={<AgentsPage />} />
-      <Route path="/files" element={<FilesPage />} />
       <Route path="/skills" element={<SkillsPage />} />
       <Route path="/knowledge" element={<KnowledgePage />} />
       <Route path="/notes" element={<NotesPage />} />

@@ -11,8 +11,7 @@ import {
   hydrateWorkbench,
   hydrateWorkspaceContent,
   hydrateWorkspacePreferences,
-  updateSettings,
-  updateProviderConfig
+  updateSettings
 } from './store/workbenchSlice'
 import './styles/global.css'
 
@@ -54,21 +53,6 @@ const bootstrap = async () => {
     todoGroups: store.getState().workbench.todoGroups,
     todoItems: store.getState().workbench.todoItems
   })
-
-  if (window.emphant?.hasCredential) {
-    for (const provider of store.getState().workbench.providers) {
-      const credentialConfigured = await window.emphant.hasCredential({
-        scope: 'provider',
-        id: provider.id
-      })
-      store.dispatch(
-        updateProviderConfig({
-          providerId: provider.id,
-          patch: { credentialConfigured }
-        })
-      )
-    }
-  }
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

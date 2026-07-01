@@ -6,6 +6,7 @@ import type {
   AgentRunResult,
   AgentRuntimeEvent,
   AgentTopicTitleRequest,
+  AudioTranscriptionRequest,
   CredentialSetRequest,
   CredentialStatusRequest,
   DocumentExtractionRequest,
@@ -28,6 +29,9 @@ import type {
   MailSendResult,
   McpServerTestResult,
   ProviderConfig,
+  SecretVaultStatus,
+  SecretVaultUnlockRequest,
+  SpeechSynthesisRequest,
   SkillImportRequest,
   SkillImportResult,
   WorkspaceFileContent,
@@ -43,7 +47,11 @@ declare global {
         platform: string
         version: string
       }>
-      scanWorkspaceFiles: (query: string, limit?: number) => Promise<WorkspaceFileMatch[]>
+      scanWorkspaceFiles: (
+        query: string,
+        limit?: number,
+        workspaceDirectory?: string
+      ) => Promise<WorkspaceFileMatch[]>
       readWorkspaceFile: (path: string) => Promise<WorkspaceFileContent>
       extractDocument: (
         request: DocumentExtractionRequest
@@ -59,11 +67,25 @@ declare global {
         workspaceDirectory: string,
         snapshot: WorkspaceContentSnapshot
       ) => Promise<void>
+      reindexWorkspace: (workspaceDirectory?: string) => Promise<void>
       saveKnowledgeSource: (request: KnowledgeSourceSaveRequest) => Promise<string>
       readKnowledgeSource: (request: KnowledgeSourceReadRequest) => Promise<Uint8Array>
       indexKnowledgeSource: (
         request: KnowledgeIndexRequest
       ) => Promise<KnowledgeIndexResult>
+      embedTexts: (
+        provider: ProviderConfig,
+        model: string,
+        texts: string[]
+      ) => Promise<number[][]>
+      rerankDocuments: (
+        provider: ProviderConfig,
+        model: string,
+        query: string,
+        documents: string[]
+      ) => Promise<number[]>
+      transcribeAudio: (request: AudioTranscriptionRequest) => Promise<string>
+      synthesizeSpeech: (request: SpeechSynthesisRequest) => Promise<Uint8Array>
       startKnowledgeExtraction: (request: KnowledgeExtractionRequest) => Promise<void>
       onKnowledgeExtractionEvent: (
         listener: (event: KnowledgeExtractionEvent) => void
@@ -91,6 +113,10 @@ declare global {
       setCredential: (request: CredentialSetRequest) => Promise<void>
       deleteCredential: (request: CredentialStatusRequest) => Promise<void>
       hasCredential: (request: CredentialStatusRequest) => Promise<boolean>
+      secretVaultStatus: () => Promise<SecretVaultStatus>
+      unlockSecretVault: (request: SecretVaultUnlockRequest) => Promise<SecretVaultStatus>
+      lockSecretVault: () => Promise<SecretVaultStatus>
+      resetSecretVault: () => Promise<SecretVaultStatus>
       listProviderModels: (provider: ProviderConfig) => Promise<string[]>
       testMcpServer: (server: McpServerConfig) => Promise<McpServerTestResult>
     }

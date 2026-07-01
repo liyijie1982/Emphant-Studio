@@ -33,6 +33,7 @@ import {
   selectMcpTools,
   selectMailAgentSettings,
   selectMailNotifications,
+  selectMessages,
   selectProviders,
   selectSettings,
   selectSkills,
@@ -53,6 +54,51 @@ type AssistantFormValues = {
   contextLimit: number
 }
 
+const assistantTemplates = [
+  {
+    id: 'strategy',
+    name: '产品策略分析',
+    description: '适合需求分析、竞品调研、路线图和方案取舍。',
+    capabilities: ['需求分析', '策略判断', '结构化输出'],
+    knowledgeBaseIds: ['kb-prd', 'kb-design'],
+    enabledToolIds: ['tool-search', 'tool-document-extract'],
+    enabledSkillIds: ['skill-research', 'skill-analysis'],
+    systemPrompt: '你是产品策略分析智能体。先界定问题和用户，再拆解事实、假设、风险和可执行建议。',
+    contextLimit: 10,
+    riskBoundary: '可联网检索和读取文档，不直接写文件或执行命令。'
+  },
+  {
+    id: 'builder',
+    name: '工程实现助手',
+    description: '适合代码方案、实现拆解、文件变更建议和验证计划。',
+    capabilities: ['代码方案', '工程拆解', '验证计划'],
+    knowledgeBaseIds: ['kb-prd'],
+    enabledToolIds: ['tool-filesystem', 'tool-file-write', 'tool-file-edit'],
+    enabledSkillIds: ['skill-coding', 'skill-command'],
+    systemPrompt: '你是工程实现智能体。优先给出边界清晰、可验证、可维护的实现方案；写文件前说明影响。',
+    contextLimit: 10,
+    riskBoundary: '可能写入工作区文件，高风险动作必须确认。'
+  },
+  {
+    id: 'research',
+    name: '研究归纳助手',
+    description: '适合资料检索、多来源汇总和证据化结论。',
+    capabilities: ['资料检索', '来源归纳', '事实核查'],
+    knowledgeBaseIds: ['kb-prd'],
+    enabledToolIds: ['tool-search', 'tool-document-extract'],
+    enabledSkillIds: ['skill-research', 'skill-document-understanding'],
+    systemPrompt: '你是研究归纳智能体。回答前说明范围，输出来源线索、关键发现、待验证假设和下一步。',
+    contextLimit: 12,
+    riskBoundary: '只读检索和文档读取，不执行外部写入动作。'
+  }
+]
+
+const getSourceLabel = (source?: string) =>
+  source === 'builtin' ? '系统预设' : source === 'user' || !source ? '用户资产' : source
+
+const getSourceTagColor = (source?: string) =>
+  source === 'builtin' ? 'geekblue' : source === 'user' || !source ? 'green' : 'purple'
+
 export const AgentsPage = () => {
   const { message } = App.useApp()
   const dispatch = useAppDispatch()
@@ -64,11 +110,13 @@ export const AgentsPage = () => {
   const skills = useAppSelector(selectSkills)
   const mailAgentSettings = useAppSelector(selectMailAgentSettings)
   const mailNotifications = useAppSelector(selectMailNotifications)
+  const messages = useAppSelector(selectMessages)
   const [assistantModalOpen, setAssistantModalOpen] = useState(false)
   const [mailAccounts, setMailAccounts] = useState<MemoryEmailAccount[]>([])
   const [checkingMail, setCheckingMail] = useState(false)
   const [editingAssistantId, setEditingAssistantId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [selectedTemplateId, setSelectedTemplateId] = useState('blank')
   const [selectedAssistantId, setSelectedAssistantId] = useState<string | null>(
     assistants[0]?.id ?? null
   )
@@ -116,6 +164,41 @@ export const AgentsPage = () => {
     () => skills.filter((skill) => activeAssistant?.enabledSkillIds?.includes(skill.id)),
     [skills, activeAssistant?.enabledSkillIds]
   )
+  const boundKnowledgeBases = useMemo(
+    () =>
+      knowledgeBases.filter((base) =>
+        activeAssistant?.knowledgeBaseIds.includes(base.id)
+      ),
+    [activeAssistant?.knowledgeBaseIds, knowledgeBases]
+  )
+  const boundTools = useMemo(
+    () =>
+      tools.filter((tool) =>
+        activeAssistant?.enabledToolIds.includes(tool.id)
+      ),
+    [activeAssistant?.enabledToolIds, tools]
+  )
+  const sensitiveTools = useMemo(
+    () =>
+      boundTools.filter((tool) =>
+        ['filesystem-write', 'command', 'system', 'database', 'devops'].includes(tool.category)
+      ),
+    [boundTools]
+  )
+  const recentRuns = useMemo(
+    () =>
+      activeAssistant
+        ? messages
+            .filter(
+              (item) =>
+                item.role === 'assistant' &&
+                item.assistantName === activeAssistant.name
+            )
+            .slice(-5)
+            .reverse()
+        : [],
+    [activeAssistant, messages]
+  )
   const filteredAssistants = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
     if (!normalizedQuery) {
@@ -134,6 +217,7 @@ export const AgentsPage = () => {
 
   const openCreateAssistant = () => {
     setEditingAssistantId(null)
+    setSelectedTemplateId('blank')
     const defaultProvider =
       providers.find((provider) => provider.id === settings.defaultProviderId && provider.enabled) ??
       providers.find((provider) => provider.enabled) ??
@@ -175,7 +259,16 @@ export const AgentsPage = () => {
     if (editingAssistantId) {
       dispatch(updateAssistant({ assistantId: editingAssistantId, patch: values }))
     } else {
-      dispatch(createAssistant(values))
+      const template = assistantTemplates.find((item) => item.id === selectedTemplateId)
+      dispatch(
+        createAssistant({
+          ...values,
+          capabilities: template?.capabilities,
+          knowledgeBaseIds: template?.knowledgeBaseIds,
+          enabledToolIds: template?.enabledToolIds,
+          enabledSkillIds: template?.enabledSkillIds
+        })
+      )
     }
     setAssistantModalOpen(false)
   }
@@ -184,7 +277,7 @@ export const AgentsPage = () => {
     <div className="agents-layout">
       <Card className="workspace-panel agents-panel agents-panel--list" bordered={false}>
         <div className="panel-header agents-list-header">
-          <Typography.Title level={4}>Agent</Typography.Title>
+          <Typography.Title level={4}>智能体</Typography.Title>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreateAssistant}>
           </Button>
         </div>
@@ -216,6 +309,9 @@ export const AgentsPage = () => {
               </button>
               <div className="select-card__actions">
                 <Tag>{assistant.model}</Tag>
+                <Tag color={getSourceTagColor(assistant.source)}>
+                  {getSourceLabel(assistant.source)}
+                </Tag>
                 {assistant.id === activeAssistant?.id && <Tag color="blue">当前</Tag>}
               </div>
             </div>
@@ -223,7 +319,7 @@ export const AgentsPage = () => {
           {filteredAssistants.length === 0 && (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={assistants.length === 0 ? '还没有 Agent' : '没有匹配的 Agent'}
+              description={assistants.length === 0 ? '还没有智能体' : '没有匹配的智能体'}
             />
           )}
         </Space>
@@ -236,19 +332,22 @@ export const AgentsPage = () => {
               <div>
                 <Typography.Title level={4}>{activeAssistant.name}</Typography.Title>
                 <Typography.Paragraph type="secondary">
-                  {activeAssistant.description || '这个 Agent 还没有补充描述。'}
+                  {activeAssistant.description || '这个智能体还没有补充描述。'}
                 </Typography.Paragraph>
               </div>
               <Space wrap>
+                <Tag color={getSourceTagColor(activeAssistant.source)}>
+                  {getSourceLabel(activeAssistant.source)}
+                </Tag>
                 <Button onClick={openEditAssistant}>编辑信息</Button>
                 {isIntentAssistant && <Tag color="purple">默认入口</Tag>}
                 {isMailAssistant && <Tag color="blue" icon={<MailOutlined />}>邮件监听</Tag>}
                 {!isIntentAssistant && !isMailAssistant && assistants.length > 1 && (
                   <Popconfirm
-                    title={`删除 Agent ${activeAssistant.name}？`}
+                    title={`删除智能体 ${activeAssistant.name}？`}
                     onConfirm={() => dispatch(deleteAssistant(activeAssistant.id))}
                   >
-                    <Button danger>删除 Agent</Button>
+                    <Button danger>删除智能体</Button>
                   </Popconfirm>
                 )}
               </Space>
@@ -256,8 +355,8 @@ export const AgentsPage = () => {
 
             <div className="agents-detail-grid">
               <div className="provider-card">
-                <strong>模型接入</strong>
-                <span>切换 Provider 和模型版本，影响当前 Agent 的回答来源。</span>
+                <strong>回答引擎</strong>
+                <span>切换当前智能体使用的模型通道和模型版本。</span>
                 <Select
                   value={activeAssistant.providerId}
                   options={providers.map((provider) => ({
@@ -300,14 +399,27 @@ export const AgentsPage = () => {
 
               <div className="provider-card">
                 <strong>能力画像</strong>
-                <span>当前 Agent 的功能定位和系统约束。</span>
-                <Space wrap>
-                  {activeAssistant.capabilities.map((capability) => (
-                    <Tag key={capability} bordered={false}>
-                      {capability}
-                    </Tag>
-                  ))}
-                </Space>
+                <span>用面向用户的方式描述它能做什么、能访问什么，以及哪里需要确认。</span>
+                <div className="agents-runtime-preview">
+                  <div>
+                    <span>功能定位</span>
+                    <strong>{activeAssistant.capabilities.join('、') || '通用对话'}</strong>
+                  </div>
+                  <div>
+                    <span>可用范围</span>
+                    <strong>
+                      {boundKnowledgeBases.length} 个知识库 · {boundTools.length} 个工具
+                    </strong>
+                  </div>
+                  <div>
+                    <span>风险边界</span>
+                    <strong>
+                      {sensitiveTools.length > 0
+                        ? `${sensitiveTools.length} 个动作执行前需要确认`
+                        : '仅使用低风险或只读能力'}
+                    </strong>
+                  </div>
+                </div>
                 <Typography.Paragraph className="agents-system-prompt">
                   {activeAssistant.systemPrompt || '还没有配置系统提示词。'}
                 </Typography.Paragraph>
@@ -317,12 +429,72 @@ export const AgentsPage = () => {
               </div>
             </div>
 
+            <div className="provider-card">
+              <div className="agent-skills-header">
+                <div>
+                  <strong>运行预览</strong>
+                  <span>这个智能体在会话中会使用的模型、知识、工具和确认边界。</span>
+                </div>
+                <Tag color={settings.openClawCore?.requireToolApproval ? 'green' : 'orange'}>
+                  {settings.openClawCore?.requireToolApproval ? '高风险动作需确认' : '执行前确认关闭'}
+                </Tag>
+              </div>
+              <div className="agents-runtime-preview">
+	                <div>
+	                  <span>模型</span>
+	                  <strong>
+	                    {activeProvider?.name ?? '未启用回答引擎'} · {activeAssistant.model}
+	                  </strong>
+	                </div>
+                <div>
+                  <span>知识库</span>
+                  <strong>
+                    {boundKnowledgeBases.length > 0
+                      ? boundKnowledgeBases.map((base) => base.name).join('、')
+                      : '不引用知识库'}
+                  </strong>
+                </div>
+                <div>
+                  <span>工具</span>
+                  <strong>
+                    {boundTools.length > 0
+                      ? boundTools.map((tool) => tool.name).join('、')
+                      : '不调用外部工具'}
+                  </strong>
+                </div>
+                <div>
+                  <span>确认边界</span>
+                  <strong>
+                    {sensitiveTools.length > 0
+                      ? `${sensitiveTools.length} 个敏感工具：${sensitiveTools
+                          .map((tool) => tool.name)
+                          .join('、')}`
+                      : '未挂载敏感工具'}
+                  </strong>
+                </div>
+              </div>
+              <div className="agents-recent-runs">
+                <strong>最近运行</strong>
+                {recentRuns.length > 0 ? (
+                  <Space wrap>
+                    {recentRuns.map((run) => (
+                      <Tag key={run.id}>
+                        {new Date(run.createdAt).toLocaleString()}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary">还没有运行记录</Typography.Text>
+                )}
+              </div>
+            </div>
+
             {isMailAssistant && (
               <div className="provider-card mail-agent-settings">
                 <div className="agent-skills-header">
                   <div>
                     <strong>邮件检查与通知</strong>
-                    <span>按设定周期检查新邮件，并将未读邮件显示在 Header 通知中。</span>
+                    <span>按设定周期检查新邮件，并在顶部通知中提醒。</span>
                   </div>
                   <Switch
                     checked={mailAgentSettings.enabled}
@@ -405,8 +577,8 @@ export const AgentsPage = () => {
             )}
 
             <div className="provider-card">
-              <strong>知识库挂载</strong>
-              <span>控制这个 Agent 在聊天页可引用的知识库范围。</span>
+              <strong>知识范围</strong>
+              <span>控制这个智能体在对话中可引用的知识。</span>
               <Space wrap>
                 {knowledgeBases.map((base) => (
                   <Tag
@@ -432,8 +604,8 @@ export const AgentsPage = () => {
             </div>
 
             <div className="provider-card">
-              <strong>工具挂载</strong>
-              <span>控制这个 Agent 在聊天页可调用的 MCP 工具。</span>
+              <strong>可用工具</strong>
+              <span>控制这个智能体在会话中可调用的扩展能力，高风险动作会进入确认流程。</span>
               <Space wrap>
                 {tools.map((tool) => (
                   <Tag
@@ -461,8 +633,8 @@ export const AgentsPage = () => {
             <div className="provider-card">
               <div className="agent-skills-header">
                 <div>
-                  <strong>Skills 挂载</strong>
-                  <span>选择这个 Agent 可使用的 Skills，运行时会按任务内容自动挑选其中几项。</span>
+                  <strong>可用技能</strong>
+                  <span>选择这个智能体可使用的技能，运行时会按任务内容自动挑选。</span>
                 </div>
                 <Tag color="blue">{boundSkills.length} 项</Tag>
               </div>
@@ -487,12 +659,12 @@ export const AgentsPage = () => {
                           })
                         )
                       }
-                      aria-label={`${mounted ? '卸载' : '挂载'} Skill ${skill.name}`}
+                      aria-label={`${mounted ? '移除' : '添加'}技能 ${skill.name}`}
                     >
                       <span>
                         <strong>{skill.name}</strong>
                         <small>
-                          {skill.kind === 'code' ? '代码型' : 'Prompt'} · {skill.description || '暂未补充描述'}
+                          {skill.kind === 'code' ? '代码型' : '提示词'} · {skill.description || '暂未补充描述'}
                         </small>
                       </span>
                       <Tag color={mounted ? 'blue' : 'default'}>
@@ -504,7 +676,7 @@ export const AgentsPage = () => {
                 </div>
               ) : (
                 <div className="agent-skills-empty">
-                  暂无 Skill，可前往 Skills 页面创建或导入。
+                  暂无技能，可前往技能页面创建或导入。
                 </div>
               )}
             </div>
@@ -512,12 +684,12 @@ export const AgentsPage = () => {
         ) : (
           <div className="agents-empty">
             <div>
-              <Typography.Title level={4}>还没有 Agent</Typography.Title>
+              <Typography.Title level={4}>还没有智能体</Typography.Title>
               <Typography.Paragraph type="secondary">
-                先创建一个 Agent，再回到工作台开始建任务和聊天。
+                先创建一个智能体，再回到工作台处理会话和任务。
               </Typography.Paragraph>
               <Button type="primary" onClick={openCreateAssistant}>
-                创建第一个 Agent
+                创建第一个智能体
               </Button>
             </div>
           </div>
@@ -526,18 +698,72 @@ export const AgentsPage = () => {
 
       <Modal
         open={assistantModalOpen}
-        title={editingAssistantId ? '编辑 Agent' : '新建 Agent'}
+        title={editingAssistantId ? '编辑智能体' : '新建智能体'}
         onCancel={() => setAssistantModalOpen(false)}
         onOk={() => void handleSubmitAssistant()}
       >
         <Form layout="vertical" form={assistantForm}>
+          {!editingAssistantId && (
+            <Form.Item label="智能体模板">
+              <Select
+                value={selectedTemplateId}
+                options={[
+                  { label: '空白智能体', value: 'blank' },
+                  ...assistantTemplates.map((template) => ({
+                    label: template.name,
+                    value: template.id
+                  }))
+                ]}
+                onChange={(templateId) => {
+                  setSelectedTemplateId(templateId)
+                  const template = assistantTemplates.find((item) => item.id === templateId)
+                  if (!template) return
+                  const defaultProvider =
+                    providers.find((provider) => provider.id === settings.defaultProviderId && provider.enabled) ??
+                    providers.find((provider) => provider.enabled) ??
+                    providers[0]
+                  assistantForm.setFieldsValue({
+                    name: template.name,
+                    description: template.description,
+                    providerId: defaultProvider?.id ?? '',
+                    model:
+                      defaultProvider?.id === settings.defaultProviderId &&
+                      defaultProvider.models.includes(settings.defaultModel)
+                        ? settings.defaultModel
+                        : defaultProvider?.models[0] ?? '',
+                    systemPrompt: template.systemPrompt,
+                    contextLimit: template.contextLimit
+                  })
+                }}
+              />
+              {selectedTemplateId !== 'blank' && (
+                <div className="agent-template-preview">
+                  {(() => {
+                    const template = assistantTemplates.find((item) => item.id === selectedTemplateId)
+                    if (!template) return null
+                    return (
+                      <>
+                        <span>{template.description}</span>
+                        <Space wrap>
+                          {template.capabilities.map((capability) => (
+                            <Tag key={capability}>{capability}</Tag>
+                          ))}
+                        </Space>
+                        <p>{template.riskBoundary}</p>
+                      </>
+                    )
+                  })()}
+                </div>
+              )}
+            </Form.Item>
+          )}
           <Form.Item label="名称" name="name" rules={[{ required: true }]}>
             <Input disabled={editingAssistantId === 'assistant-main'} />
           </Form.Item>
           <Form.Item label="描述" name="description">
             <Input />
           </Form.Item>
-          <Form.Item label="Provider" name="providerId" rules={[{ required: true }]}>
+          <Form.Item label="回答引擎" name="providerId" rules={[{ required: true }]}>
             <Select
               options={providers.map((provider) => ({
                 label: provider.enabled ? provider.name : `${provider.name}（已停用）`,

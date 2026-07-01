@@ -16,13 +16,8 @@ export const loadWorkbenchSnapshot = async (): Promise<WorkbenchState | null> =>
 
     for (const provider of legacyProviders) {
       if (provider.apiKey) {
-        await window.emphant.setCredential({
-          scope: 'provider',
-          id: provider.id,
-          secret: provider.apiKey
-        })
-        provider.credentialConfigured = true
         delete provider.apiKey
+        provider.credentialConfigured = false
       } else {
         provider.credentialConfigured = await window.emphant.hasCredential({
           scope: 'provider',

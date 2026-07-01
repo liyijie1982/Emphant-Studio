@@ -23,6 +23,8 @@ import type {
   Message,
   MessageBlock,
   MessageRole,
+  ModelDefaultType,
+  ProviderAccessType,
   ProviderConfig,
   Skill,
   SystemNote,
@@ -147,34 +149,123 @@ const makeMessage = ({
 
 const initialProviders: ProviderConfig[] = [
   {
-    id: 'provider-openai-compatible',
-    name: 'OpenAI Compatible',
+    id: 'provider-chatgpt',
+    name: 'ChatGPT',
     kind: 'cloud',
+    accessType: 'chatgpt',
+    providerKey: 'chatgpt',
     baseUrl: 'https://api.openai.com/v1',
     apiKeyHint: 'sk-...',
-    models: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o-mini'],
+    models: [
+      'gpt-4.1',
+      'gpt-4.1-mini',
+      'gpt-4o-mini',
+      'gpt-4o-mini-transcribe',
+      'gpt-4o-mini-tts',
+      'whisper-1',
+      'tts-1',
+      'tts-1-hd',
+      'text-embedding-3-small',
+      'text-embedding-3-large'
+    ],
     capabilities: ['chat', 'vision', 'tools', 'knowledge'],
-    enabled: true
+    enabled: false
   },
   {
     id: 'provider-anthropic',
     name: 'Anthropic',
     kind: 'cloud',
+    accessType: 'anthropic',
+    providerKey: 'anthropic',
     baseUrl: 'https://api.anthropic.com',
     apiKeyHint: 'sk-ant-...',
     models: ['claude-sonnet-4', 'claude-haiku-3.5'],
     capabilities: ['chat', 'vision', 'tools'],
-    enabled: true
+    enabled: false
   },
   {
-    id: 'provider-ollama',
-    name: 'Ollama',
-    kind: 'local',
-    baseUrl: 'http://127.0.0.1:11434',
-    apiKeyHint: '无须 API Key',
-    models: ['qwen3:8b', 'llama3.1:8b'],
+    id: 'provider-deepseek',
+    name: 'DeepSeek',
+    kind: 'cloud',
+    accessType: 'deepseek',
+    providerKey: 'deepseek',
+    baseUrl: 'https://api.deepseek.com/v1',
+    apiKeyHint: 'sk-...',
+    models: ['deepseek-chat', 'deepseek-reasoner'],
+    capabilities: ['chat', 'tools', 'knowledge'],
+    enabled: false
+  },
+  {
+    id: 'provider-qwen',
+    name: '通义千问',
+    kind: 'cloud',
+    accessType: 'qwen',
+    providerKey: 'qwen',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKeyHint: 'sk-...',
+    models: ['qwen-plus', 'qwen-turbo', 'qwen-max', 'gte-rerank-v2', 'gte-rerank'],
+    capabilities: ['chat', 'vision', 'tools', 'knowledge'],
+    enabled: false
+  },
+  {
+    id: 'provider-moonshot',
+    name: 'Moonshot',
+    kind: 'cloud',
+    accessType: 'moonshot',
+    providerKey: 'moonshot',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    apiKeyHint: 'sk-...',
+    models: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
     capabilities: ['chat', 'knowledge'],
-    enabled: true
+    enabled: false
+  },
+  {
+    id: 'provider-zhipu',
+    name: '智谱 GLM',
+    kind: 'cloud',
+    accessType: 'zhipu',
+    providerKey: 'zhipu',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    apiKeyHint: '请输入 API Key',
+    models: ['glm-4-plus', 'glm-4-air', 'glm-4-flash', 'bge-reranker-v2-m3'],
+    capabilities: ['chat', 'tools', 'knowledge'],
+    enabled: false
+  },
+  {
+    id: 'provider-baichuan',
+    name: '百川智能',
+    kind: 'cloud',
+    accessType: 'baichuan',
+    providerKey: 'baichuan',
+    baseUrl: 'https://api.baichuan-ai.com/v1',
+    apiKeyHint: 'sk-...',
+    models: ['Baichuan4', 'Baichuan3-Turbo'],
+    capabilities: ['chat', 'knowledge'],
+    enabled: false
+  },
+  {
+    id: 'provider-minimax',
+    name: 'MiniMax',
+    kind: 'cloud',
+    accessType: 'minimax',
+    providerKey: 'minimax',
+    baseUrl: 'https://api.minimax.chat/v1',
+    apiKeyHint: '请输入 API Key',
+    models: ['MiniMax-Text-01'],
+    capabilities: ['chat', 'vision', 'knowledge'],
+    enabled: false
+  },
+  {
+    id: 'provider-doubao',
+    name: '豆包',
+    kind: 'cloud',
+    accessType: 'doubao',
+    providerKey: 'doubao',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    apiKeyHint: '请输入 API Key',
+    models: ['doubao-1-5-pro-32k-250115', 'doubao-1-5-lite-32k-250115'],
+    capabilities: ['chat', 'vision', 'tools', 'knowledge'],
+    enabled: false
   }
 ]
 
@@ -187,7 +278,8 @@ const initialKnowledgeBases: KnowledgeBase[] = [
     chunkCount: 128,
     status: 'ready',
     tags: ['prd', 'planning'],
-    indexedContent: '产品目标包括多模型统一接入、助手与任务组织、结构化消息、知识库问答、MCP 工具调用和桌面端效率能力。'
+    source: 'builtin',
+    indexedContent: '产品目标包括模型服务统一接入、智能体与任务组织、结构化消息、知识问答、外部工具调用和桌面端效率能力。'
   },
   {
     id: 'kb-design',
@@ -197,6 +289,7 @@ const initialKnowledgeBases: KnowledgeBase[] = [
     chunkCount: 84,
     status: 'ready',
     tags: ['design', 'ui'],
+    source: 'builtin',
     indexedContent: '前端整体是桌面工作台形态，聊天页是视觉基准，页面应统一双栏或三段式布局以及工具型视觉语言。'
   }
 ]
@@ -223,7 +316,7 @@ const initialMcpTools: McpTool[] = [
     name: 'Write File',
     description: '在当前会话工作目录内创建文件或覆盖已有文件。',
     serverName: 'mcp-filesystem',
-    enabled: true,
+    enabled: false,
     category: 'filesystem-write'
   },
   {
@@ -231,7 +324,7 @@ const initialMcpTools: McpTool[] = [
     name: 'Edit File',
     description: '在当前会话工作目录内精确修改已有文本文件。',
     serverName: 'mcp-filesystem',
-    enabled: true,
+    enabled: false,
     category: 'filesystem-write'
   },
   {
@@ -255,7 +348,7 @@ const initialMcpTools: McpTool[] = [
     name: 'System Command',
     description: '在当前工作区内执行低风险终端命令，返回 stdout、stderr 和退出码。',
     serverName: 'mcp-system-command',
-    enabled: true,
+    enabled: false,
     category: 'command'
   },
   {
@@ -263,8 +356,80 @@ const initialMcpTools: McpTool[] = [
     name: 'System Automation',
     description: '用于打开应用、剪贴板、截图、通知等桌面系统操作的受控扩展位。',
     serverName: 'mcp-system-automation',
-    enabled: true,
+    enabled: false,
     category: 'system'
+  },
+  {
+    id: 'tool-postgresql',
+    name: 'PostgreSQL MCP',
+    description: '浏览表结构、执行 SQL 查询、事务读写和多库连接，支持只读权限隔离。',
+    serverName: 'mcp-postgresql',
+    enabled: false,
+    category: 'database'
+  },
+  {
+    id: 'tool-sqlite',
+    name: 'SQLite MCP',
+    description: '本地轻量数据库操作，无需独立服务，适合小型本地业务数据。',
+    serverName: 'mcp-sqlite',
+    enabled: false,
+    category: 'database'
+  },
+  {
+    id: 'tool-mysql',
+    name: 'MySQL MCP',
+    description: '关系型数据库通用查询、数据导出和表创建。',
+    serverName: 'mcp-mysql',
+    enabled: false,
+    category: 'database'
+  },
+  {
+    id: 'tool-mongodb',
+    name: 'MongoDB MCP',
+    description: '文档型数据库通用查询、数据导出和集合创建。',
+    serverName: 'mcp-mongodb',
+    enabled: false,
+    category: 'database'
+  },
+  {
+    id: 'tool-clickhouse',
+    name: 'ClickHouse MCP',
+    description: '面向时序大数据和日志分析的数据工程查询能力。',
+    serverName: 'mcp-clickhouse',
+    enabled: false,
+    category: 'database'
+  },
+  {
+    id: 'tool-docker-k8s',
+    name: 'Docker / K8s MCP',
+    description: '容器镜像构建、Pod 启停、日志查看和 kubectl 指令封装。',
+    serverName: 'mcp-docker-k8s',
+    enabled: false,
+    category: 'devops'
+  },
+  {
+    id: 'tool-obsidian',
+    name: 'Obsidian MCP',
+    description: '搜索、读取、修改 Markdown 笔记，并检索双向链接。',
+    serverName: 'mcp-obsidian',
+    enabled: false,
+    category: 'knowledge'
+  },
+  {
+    id: 'tool-feishu',
+    name: '飞书 MCP',
+    description: '发送消息、读取群聊、查询日程和导出文档。',
+    serverName: 'mcp-feishu',
+    enabled: false,
+    category: 'collaboration'
+  },
+  {
+    id: 'tool-dingtalk',
+    name: '钉钉 MCP',
+    description: '发送消息、读取群聊、查询日程和导出文档。',
+    serverName: 'mcp-dingtalk',
+    enabled: false,
+    category: 'collaboration'
   }
 ]
 
@@ -275,7 +440,7 @@ const initialFiles: FileRecord[] = [
     mimeType: 'text/markdown',
     size: 18600,
     uploadedAt: now(),
-    contentText: 'Emphant Studio 是一款面向桌面端的 AI 工作台产品，支持多模型、知识库、工具和文件能力。'
+    contentText: 'Emphant Studio 是一款面向桌面端的 AI 工作台产品，支持模型服务、知识、外部工具和任务工作流。'
   }
 ]
 
@@ -283,7 +448,7 @@ const initialTodoItems: TodoItem[] = [
   {
     id: 'todo-chat-workbench',
     title: '完善聊天工作台主链路',
-    description: '补齐真实 Provider 调用、错误态、流式输出和上下文裁剪。',
+    description: '补齐真实模型调用、错误态、流式输出和上下文裁剪。',
     taskGroup: '工作台任务组',
     status: 'pending',
     createdAt: now(),
@@ -292,9 +457,9 @@ const initialTodoItems: TodoItem[] = [
   },
   {
     id: 'todo-knowledge',
-    title: '打通知识库导入与检索',
+    title: '打通知识导入与检索',
     description: '支持更多文件类型、切片预览、索引状态和引用回溯。',
-    taskGroup: '知识库任务组',
+    taskGroup: '知识任务组',
     status: 'pending',
     createdAt: now(),
     updatedAt: now(),
@@ -302,9 +467,9 @@ const initialTodoItems: TodoItem[] = [
   },
   {
     id: 'todo-agent-workflow',
-    title: '扩展 Agent 工作流',
-    description: '加入 Agent Session、任务状态跟踪和结果回写。',
-    taskGroup: 'Agent 工作流任务组',
+    title: '扩展智能体工作流',
+    description: '加入智能体会话、任务状态跟踪和结果回写。',
+    taskGroup: '智能体工作流任务组',
     status: 'pending',
     createdAt: now(),
     updatedAt: now(),
@@ -336,64 +501,19 @@ const initialTodoItems: TodoItem[] = [
 const initialTodoNotifications: TodoNotification[] = []
 const initialTodoGroups: string[] = []
 
-const initialMcpServers: McpServerConfig[] = [
-  {
-    id: 'preset-firecrawl',
-    name: 'Firecrawl（本地）',
-    enabled: false,
-    transport: 'http',
-    url: 'http://127.0.0.1:3000/mcp',
-    service: 'firecrawl',
-    preset: true,
-    docsUrl: 'https://github.com/firecrawl/firecrawl-mcp-server',
-    authMode: 'header',
-    authHeaderName: 'Authorization',
-    credentialConfigured: false,
-    enabledToolNames: [],
-    discoveredTools: []
-  },
-  {
-    id: 'preset-todoist',
-    name: 'Todoist（官方）',
-    enabled: false,
-    transport: 'http',
-    url: 'https://ai.todoist.net/mcp',
-    service: 'todoist',
-    preset: true,
-    docsUrl: 'https://github.com/Doist/todoist-mcp',
-    authMode: 'oauth',
-    credentialConfigured: false,
-    enabledToolNames: [],
-    discoveredTools: []
-  },
-  {
-    id: 'preset-notion',
-    name: 'Notion（本地）',
-    enabled: false,
-    transport: 'http',
-    url: 'http://127.0.0.1:3000/mcp',
-    service: 'notion',
-    preset: true,
-    docsUrl: 'https://github.com/makenotion/notion-mcp-server',
-    authMode: 'header',
-    authHeaderName: 'Authorization',
-    credentialConfigured: false,
-    enabledToolNames: [],
-    discoveredTools: []
-  }
-]
+const initialMcpServers: McpServerConfig[] = []
 
 const initialAssistants: Assistant[] = [
   {
     id: 'assistant-main',
     name: '意图识别',
-    description: '默认入口，负责识别用户意图并调度一个或多个专业 Agent。',
-    providerId: 'provider-openai-compatible',
+    description: '默认入口，负责识别用户意图并调度一个或多个专业智能体。',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1',
     systemPrompt:
-      '你是 Emphant Studio 的意图识别 Agent。先理解用户目标，再决定直接回答或委派给专业 Agent。简单任务只委派一个最匹配的 Agent；只读运维查询、状态检查、Docker 服务列表等任务不得多级委派。汇总时去重寒暄、重复选择题、安全免责声明、执行计划和工具能力说明，只保留结论、关键结果、失败原因和最小下一步。未经用户明确要求，不要生成脚本、PDF、备忘单或其他文件。',
+      '你是 Emphant Studio 的意图识别智能体。先理解用户目标，再决定直接回答或委派给专业智能体。简单任务只委派一个最匹配的智能体；只读运维查询、状态检查、Docker 服务列表等任务不得多级委派。汇总时去重寒暄、重复选择题、安全免责声明、执行计划和工具能力说明，只保留结论、关键结果、失败原因和最小下一步。未经用户明确要求，不要生成脚本、PDF、备忘单或其他文件。',
     contextLimit: 12,
-    capabilities: ['意图识别', '自动路由', '多 Agent 协作', '工具调用'],
+    capabilities: ['意图识别', '自动路由', '多智能体协作', '工具调用'],
     knowledgeBaseIds: ['kb-prd', 'kb-design'],
     enabledToolIds: [
       'tool-search',
@@ -407,7 +527,7 @@ const initialAssistants: Assistant[] = [
     id: 'assistant-mail',
     name: '邮件助手',
     description: '定时检查邮箱，将新邮件转为工作台任务，并根据处理意见回复或发送邮件。',
-    providerId: 'provider-openai-compatible',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1-mini',
     systemPrompt:
       '你是 Emphant Studio 的邮件助手。负责检查新邮件、提取发件人和主题、创建处理任务，并根据用户在任务中的意见回复邮件。用户明确要求向某个邮箱发信时，可直接生成并发送邮件；删除或批量发送仍需确认。',
@@ -420,11 +540,11 @@ const initialAssistants: Assistant[] = [
     id: 'assistant-strategy',
     name: '策略助手',
     description: '适合梳理需求、规划方案和输出结构化结论。',
-    providerId: 'provider-openai-compatible',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1',
     systemPrompt: '你是一个偏产品与策略分析的 AI 助手，回答时优先结构化、简洁、可执行。',
     contextLimit: 8,
-    capabilities: ['聊天', '知识库', '工具调用'],
+    capabilities: ['聊天', '知识', '工具调用'],
     knowledgeBaseIds: ['kb-prd', 'kb-design'],
     enabledToolIds: ['tool-search', 'tool-document-extract']
   },
@@ -444,11 +564,11 @@ const initialAssistants: Assistant[] = [
     id: 'assistant-research',
     name: '研究助手',
     description: '适合资料检索、竞品调研和多来源信息归纳。',
-    providerId: 'provider-openai-compatible',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1-mini',
     systemPrompt: '你是一个研究型 AI 助手，回答时先界定问题，再给出来源线索、关键发现和待验证假设。',
     contextLimit: 10,
-    capabilities: ['聊天', '检索', '知识库'],
+    capabilities: ['聊天', '检索', '知识'],
     knowledgeBaseIds: ['kb-prd'],
     enabledToolIds: ['tool-search']
   },
@@ -468,7 +588,7 @@ const initialAssistants: Assistant[] = [
     id: 'assistant-data',
     name: '数据分析助手',
     description: '适合拆解指标、解释数据变化和产出分析结论。',
-    providerId: 'provider-openai-compatible',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1',
     systemPrompt: '你是一个数据分析助手，回答时优先说明口径、指标关系、异常点和下一步验证方式。',
     contextLimit: 10,
@@ -480,24 +600,24 @@ const initialAssistants: Assistant[] = [
     id: 'assistant-meeting',
     name: '会议纪要助手',
     description: '适合整理会议记录、提炼决策和生成行动项。',
-    providerId: 'provider-ollama',
+    providerId: 'provider-chatgpt',
     model: 'qwen3:8b',
     systemPrompt: '你是一个会议纪要助手，输出应包含议题、结论、待办、负责人和风险提醒。',
     contextLimit: 12,
-    capabilities: ['聊天', '总结', 'TODO'],
+    capabilities: ['聊天', '总结', '任务'],
     knowledgeBaseIds: [],
     enabledToolIds: ['tool-automation', 'tool-document-extract']
   },
   {
     id: 'assistant-todo',
-    name: 'TODO助手',
-    description: '在工作台中拆分、整理任务，并添加到系统 TODO。',
-    providerId: 'provider-openai-compatible',
+    name: '任务助手',
+    description: '在工作台中拆分、整理任务，并添加到系统任务。',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1-mini',
     systemPrompt:
-      '你是 Emphant Studio 的 TODO 助手。你的核心职责是根据用户输入详细分析任务信息，把每次调用拆成一组适合 AI 执行的系统 TODO，并自动生成简洁任务组名。每个任务需要包含任务组、任务标题、执行说明、建议时间和完成标准。不要只输出泛泛建议，应优先形成可直接写入 TODO 的结构化行动项。',
+      '你是 Emphant Studio 的任务助手。你的核心职责是根据用户输入详细分析任务信息，把每次调用拆成一组适合 AI 执行的系统任务，并自动生成简洁任务组名。每个任务需要包含任务组、任务标题、执行说明、建议时间和完成标准。不要只输出泛泛建议，应优先形成可直接写入任务列表的结构化行动项。',
     contextLimit: 10,
-    capabilities: ['TODO 拆分', '任务整理', '任务入库'],
+    capabilities: ['任务拆分', '任务整理', '任务入库'],
     knowledgeBaseIds: ['kb-prd'],
     enabledToolIds: ['tool-automation']
   },
@@ -505,7 +625,7 @@ const initialAssistants: Assistant[] = [
     id: 'assistant-automation',
     name: '自动化助手',
     description: '适合把复杂目标拆成流程、检查清单和可执行任务。',
-    providerId: 'provider-openai-compatible',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1-mini',
     systemPrompt: '你是一个自动化与任务编排助手，回答时把目标拆成步骤、依赖、触发条件和完成标准。',
     contextLimit: 10,
@@ -517,7 +637,7 @@ const initialAssistants: Assistant[] = [
     id: 'assistant-system-operator',
     name: '系统操作助手',
     description: '适合执行工作区内命令、检查项目状态和辅助桌面自动化操作。',
-    providerId: 'provider-openai-compatible',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1-mini',
     systemPrompt:
       '你是一个系统操作助手。先判断风险；只读查询命令（如 pwd、git status、docker ps、systemctl status、df -h、ssh BatchMode 探测）属于低风险，不需要二次确认，应直接执行无交互、可超时的探测。涉及删除、sudo、系统目录、安装依赖、提交或推送代码等中高风险操作时，必须先说明影响并要求用户确认。命令结果要精简总结退出码、关键输出和下一步建议；不要输出安全免责声明、执行计划、确认问题或工具能力说明。未经用户明确要求，不要生成脚本、PDF、备忘单或其他文件。',
@@ -536,16 +656,16 @@ const initialAssistants: Assistant[] = [
     id: 'assistant-linux-ops',
     name: '运维助手',
     description: '通过受控命令和 SSH 检查、诊断并管理多台 Linux 服务器。',
-    providerId: 'provider-openai-compatible',
+    providerId: 'provider-chatgpt',
     model: 'gpt-4.1',
     systemPrompt:
-      '你是 Emphant Studio 的 Linux 运维助手。面向多台 Linux 服务器执行巡检、故障诊断、容量分析、服务状态检查和变更方案设计。默认优先处理只读命令；docker ps、systemctl status、df -h、uptime、ssh 连通性探测等只读检查属于低风险，不需要二次确认，应直接使用可用工具执行。用户提供的 SSH 密码可用于本次受控连接，但不得回显、保存或记录。缺少必要连接信息时只追问一个必要信息。不得再委派给其他 Agent。涉及重启服务、修改配置、安装软件、删除文件、变更防火墙、扩缩容、数据库写操作或 sudo 权限时，必须先说明影响、回滚方式和验证步骤，并等待用户确认。输出必须精简：不要复述用户目标，不要写安全免责声明、执行计划、确认问题、PDF/脚本/离线指南推荐；只给结论、关键数据和必要下一步。',
+      '你是 Emphant Studio 的 Linux 运维助手。面向多台 Linux 服务器执行巡检、故障诊断、容量分析、服务状态检查和变更方案设计。默认优先处理只读命令；docker ps、systemctl status、df -h、uptime、ssh 连通性探测等只读检查属于低风险，不需要二次确认，应直接使用可用工具执行。用户提供的 SSH 密码可用于本次受控连接，但不得回显、保存或记录。缺少必要连接信息时只追问一个必要信息。不得再委派给其他智能体。涉及重启服务、修改配置、安装软件、删除文件、变更防火墙、扩缩容、数据库写操作或 sudo 权限时，必须先说明影响、回滚方式和验证步骤，并等待用户确认。输出必须精简：不要复述用户目标，不要写安全免责声明、执行计划、确认问题、PDF/脚本/离线指南推荐；只给结论、关键数据和必要下一步。',
     contextLimit: 16,
     capabilities: ['Linux', 'SSH 巡检', '多服务器管理', '故障诊断', '变更确认'],
     knowledgeBaseIds: [],
     enabledToolIds: ['tool-shell-command', 'tool-filesystem', 'tool-file-write']
   }
-]
+].map((assistant): Assistant => ({ ...assistant, source: 'builtin' }))
 
 const initialSkills: Skill[] = [
   {
@@ -595,7 +715,7 @@ const initialSkills: Skill[] = [
     description: '把会议记录整理成议题、结论、行动项和风险提醒。',
     kind: 'prompt',
     instructions: '按议题、结论、行动项、负责人和风险组织内容，不补写会议中没有的信息。',
-    tags: ['总结', 'TODO', '协作'],
+    tags: ['总结', '任务', '协作'],
     enabled: true,
     version: '1.1.0',
     source: 'builtin',
@@ -614,18 +734,18 @@ const initialSkills: Skill[] = [
   },
   {
     id: 'skill-todo-assistant',
-    name: 'TODO 拆分入库',
-    description: '把工作台目标拆成同一任务组下的系统 TODO。',
+    name: '任务拆分入库',
+    description: '把工作台目标拆成同一任务组下的系统任务。',
     kind: 'prompt',
     instructions:
-      '将用户目标拆成 2-6 个适合 AI 执行的任务，自动生成本次调用的任务组名；每个任务包含标题、说明、建议执行时间或触发条件，并写入系统 TODO。',
-    tags: ['TODO', '任务拆分', '计划'],
+      '将用户目标拆成 2-6 个适合 AI 执行的任务，自动生成本次调用的任务组名；每个任务包含标题、说明、建议执行时间或触发条件，并写入系统任务。',
+    tags: ['任务', '任务拆分', '计划'],
     enabled: true,
     version: '1.0.0',
     source: 'builtin',
     requiredToolIds: ['tool-automation'],
     permissions: ['task.write'],
-    triggers: ['拆分任务', '加入TODO', '整理TODO', '待办']
+    triggers: ['拆分任务', '加入任务', '整理任务', '待办']
   },
   {
     id: 'skill-command',
@@ -725,14 +845,14 @@ const initialSkills: Skill[] = [
     description: '把聊天、网页和文件整理为可检索的结构化笔记。',
     kind: 'prompt',
     instructions:
-      '提炼主题、关键结论、证据、关联概念、待办和标签；避免重复保存，明确来源与更新时间，并提出适合写入知识库的标题。',
-    tags: ['知识库', '笔记', '整理'],
+      '提炼主题、关键结论、证据、关联概念、待办和标签；避免重复保存，明确来源与更新时间，并提出适合写入知识的标题。',
+    tags: ['知识', '笔记', '整理'],
     enabled: true,
     version: '1.0.0',
     source: 'builtin',
     requiredToolIds: ['tool-document-extract'],
     permissions: ['workspace.read', 'knowledge.write'],
-    triggers: ['整理知识', '沉淀笔记', '加入知识库']
+    triggers: ['整理知识', '沉淀笔记', '加入知识']
   },
   {
     id: 'skill-linux-server-ops',
@@ -828,7 +948,7 @@ const initialMessages: Message[] = [
     role: 'assistant',
     topicId: 'topic-roadmap',
     assistantName: '策略助手',
-    blocks: [createTextBlock('欢迎来到 Emphant Studio。这里会逐步接入多模型、知识库、MCP 与文件工作流。')]
+    blocks: [createTextBlock('欢迎来到 Emphant Studio。这里会逐步接入模型服务、知识、外部工具与任务工作流。')]
   }),
   makeMessage({
     id: 'message-shell-welcome',
@@ -887,18 +1007,26 @@ const initialMessages: Message[] = [
 
 const defaultOpenClawCore = {
   enabled: true,
-  sandboxEnabled: false,
+  sandboxEnabled: true,
   maxDelegatedAgents: 3,
   auditLogEnabled: true,
-  requireToolApproval: false
+  requireToolApproval: true
 }
 
 const initialSettings: WorkspaceSettings = {
-  defaultProviderId: 'provider-openai-compatible',
+  defaultProviderId: 'provider-chatgpt',
   defaultModel: 'gpt-4.1',
+  defaultEmbeddingProviderId: 'provider-chatgpt',
+  defaultEmbeddingModel: 'text-embedding-3-small',
+  defaultAsrProviderId: 'provider-chatgpt',
+  defaultAsrModel: 'gpt-4o-mini-transcribe',
+  defaultTtsProviderId: 'provider-chatgpt',
+  defaultTtsModel: 'gpt-4o-mini-tts',
+  defaultRerankProviderId: '',
+  defaultRerankModel: '',
   defaultWorkingDirectory: '',
   restoreWorkspaceOnLaunch: true,
-  useMockResponsesWhenProviderFails: true,
+  useMockResponsesWhenProviderFails: false,
   openClawCore: defaultOpenClawCore
 }
 
@@ -943,6 +1071,51 @@ const mergeById = <T extends { id: string }>(current: T[], presets: T[]) => {
     .map((item) => JSON.parse(JSON.stringify(item)) as T)
   return [...current, ...missingPresets]
 }
+
+const inferProviderAccessType = (provider: Partial<ProviderConfig>): ProviderAccessType => {
+  if (provider.accessType) return provider.accessType
+  if (provider.id === 'provider-chatgpt') return 'chatgpt'
+  if (provider.id === 'provider-ollama') return 'ollama'
+  if (provider.id === 'provider-anthropic') return 'anthropic'
+  return 'openai-compatible'
+}
+
+const legacyDefaultProviderIds = new Set(['provider-openai-compatible', 'provider-ollama'])
+
+const normalizeProviders = (providers: ProviderConfig[] = []) =>
+  mergeById(
+    providers
+      .filter((provider) => !legacyDefaultProviderIds.has(provider.id) || provider.custom)
+      .map((provider) => {
+        const accessType = inferProviderAccessType(provider)
+        const preset =
+          initialProviders.find((item) => item.id === provider.id) ??
+          initialProviders.find((item) => item.accessType === accessType)
+        const models = Array.from(new Set([...(provider.models ?? []), ...(preset?.models ?? [])]))
+        return {
+          ...preset,
+          ...provider,
+          accessType,
+          providerKey: provider.providerKey ?? preset?.providerKey ?? accessType,
+          custom:
+            provider.custom ??
+            !initialProviders.some((item) => item.id === provider.id),
+          baseUrl: provider.baseUrl ?? preset?.baseUrl ?? '',
+          apiKeyHint: provider.apiKeyHint ?? preset?.apiKeyHint ?? '请输入 API Key',
+          models,
+          capabilities: provider.capabilities ?? preset?.capabilities ?? ['chat'],
+          enabled: provider.enabled ?? preset?.enabled ?? false
+        }
+      }),
+    initialProviders
+  )
+
+const isUnusedPresetMcpServer = (server: McpServerConfig) =>
+  server.preset === true &&
+  !server.enabled &&
+  !server.credentialConfigured &&
+  (server.enabledToolNames?.length ?? 0) === 0 &&
+  (server.discoveredTools?.length ?? 0) === 0
 
 const matchesSkillIntent = (skill: Skill, prompt: string) => {
   const normalizedPrompt = prompt.toLowerCase()
@@ -1020,6 +1193,17 @@ const mergePresetWorkbenchContent = (state: WorkbenchState): WorkbenchState => {
   mergedState.systemNotes = mergedState.systemNotes ?? []
   mergedState.activeSystemNoteId = mergedState.activeSystemNoteId ?? null
   mergedState.assistants = mergeById(mergedState.assistants, initialAssistants)
+  mergedState.assistants.forEach((assistant) => {
+    assistant.source =
+      assistant.source ??
+      (initialAssistants.some((preset) => preset.id === assistant.id) ? 'builtin' : 'user')
+    if (legacyDefaultProviderIds.has(assistant.providerId)) {
+      assistant.providerId = 'provider-chatgpt'
+      if (assistant.model.startsWith('qwen3:') || assistant.model.startsWith('llama')) {
+        assistant.model = 'gpt-4.1-mini'
+      }
+    }
+  })
   mergedState.skills = mergeById(mergedState.skills ?? [], initialSkills)
   mergedState.skills = mergedState.skills.map((skill) => ({
     ...skill,
@@ -1060,16 +1244,58 @@ const mergePresetWorkbenchContent = (state: WorkbenchState): WorkbenchState => {
   mergedState.topics = mergedState.topics ?? []
   mergedState.topics.forEach((topic) => {
     topic.titleMode =
-      topic.titleMode ?? (/^新任务\s*\d*$/.test(topic.title) ? 'placeholder' : 'manual')
+      topic.titleMode ?? (/^新(?:任务|会话)\s*\d*$/.test(topic.title) ? 'placeholder' : 'manual')
+    if (topic.titleMode === 'placeholder' && /^新任务\s*\d*$/.test(topic.title)) {
+      topic.title = topic.title.replace('新任务', '新会话')
+    }
   })
   mergedState.messages = mergedState.messages ?? []
+  mergedState.providers = normalizeProviders(mergedState.providers)
+  mergedState.settings = {
+    ...initialSettings,
+    ...mergedState.settings
+  }
+  if (legacyDefaultProviderIds.has(mergedState.settings.defaultProviderId)) {
+    const chatgptProvider = mergedState.providers.find((provider) => provider.id === 'provider-chatgpt')
+    mergedState.settings.defaultProviderId = 'provider-chatgpt'
+    mergedState.settings.defaultModel = chatgptProvider?.models.includes(mergedState.settings.defaultModel)
+      ? mergedState.settings.defaultModel
+      : chatgptProvider?.models[0] ?? 'gpt-4.1'
+  }
   mergedState.settings.defaultWorkingDirectory =
     mergedState.settings.defaultWorkingDirectory ?? ''
+  if (!mergedState.settings.defaultEmbeddingProviderId && !mergedState.settings.defaultEmbeddingModel) {
+    const chatgptProvider = mergedState.providers.find((provider) => provider.id === 'provider-chatgpt')
+    if (chatgptProvider?.models.includes('text-embedding-3-small')) {
+      mergedState.settings.defaultEmbeddingProviderId = 'provider-chatgpt'
+      mergedState.settings.defaultEmbeddingModel = 'text-embedding-3-small'
+    }
+  }
+  if (!mergedState.settings.defaultAsrProviderId && !mergedState.settings.defaultAsrModel) {
+    const chatgptProvider = mergedState.providers.find((provider) => provider.id === 'provider-chatgpt')
+    if (chatgptProvider?.models.includes('gpt-4o-mini-transcribe')) {
+      mergedState.settings.defaultAsrProviderId = 'provider-chatgpt'
+      mergedState.settings.defaultAsrModel = 'gpt-4o-mini-transcribe'
+    }
+  }
+  if (!mergedState.settings.defaultTtsProviderId && !mergedState.settings.defaultTtsModel) {
+    const chatgptProvider = mergedState.providers.find((provider) => provider.id === 'provider-chatgpt')
+    if (chatgptProvider?.models.includes('gpt-4o-mini-tts')) {
+      mergedState.settings.defaultTtsProviderId = 'provider-chatgpt'
+      mergedState.settings.defaultTtsModel = 'gpt-4o-mini-tts'
+    }
+  }
   mergedState.settings.openClawCore = {
     ...defaultOpenClawCore,
     ...(mergedState.settings.openClawCore ?? {})
   }
   mergedState.knowledgeBases = mergeById(mergedState.knowledgeBases, initialKnowledgeBases)
+  mergedState.knowledgeBases = mergedState.knowledgeBases.map((base) => ({
+    ...base,
+    source:
+      base.source ??
+      (initialKnowledgeBases.some((preset) => preset.id === base.id) ? 'builtin' : 'user')
+  }))
   mergedState.mcpTools = mergeById(mergedState.mcpTools, initialMcpTools)
   const documentAssistantIds = new Set([
     'assistant-main',
@@ -1099,7 +1325,10 @@ const mergePresetWorkbenchContent = (state: WorkbenchState): WorkbenchState => {
       }
     })
   }
-  mergedState.mcpServers = mergeById(mergedState.mcpServers ?? [], initialMcpServers)
+  mergedState.mcpServers = mergeById(
+    (mergedState.mcpServers ?? []).filter((server) => !isUnusedPresetMcpServer(server)),
+    initialMcpServers
+  )
   mergedState.files = mergeById(mergedState.files, initialFiles)
   mergedState.mailAgentSettings = {
     ...initialMailAgentSettings,
@@ -1177,13 +1406,13 @@ const applySkillsToAssistant = (
     ...assistant,
     systemPrompt: [
       assistant.systemPrompt,
-      `\n\n根据当前任务选择使用的 Skills：\n${enabledSkills
+      `\n\n根据当前任务选择使用的技能：\n${enabledSkills
         .map((skill) => {
           const codeHint =
             skill.kind === 'code'
-              ? `\n  类型：代码型 Skill；运行时：${skill.code?.runtime ?? 'unknown'}；入口：${skill.code?.entrypoint ?? skill.code?.command ?? '未声明'}。当前版本仅将其作为受控能力说明，不直接执行本地代码。`
+              ? `\n  类型：代码型技能；运行时：${skill.code?.runtime ?? 'unknown'}；入口：${skill.code?.entrypoint ?? skill.code?.command ?? '未声明'}。当前版本仅将其作为受控能力说明，不直接执行本地代码。`
               : ''
-          return `- ${skill.name}（${skill.kind === 'code' ? '代码型' : 'Prompt'}）：${skill.instructions}${codeHint}`
+          return `- ${skill.name}（${skill.kind === 'code' ? '代码型' : '提示词'}）：${skill.instructions}${codeHint}`
         })
         .join('\n')}`
     ]
@@ -1259,15 +1488,15 @@ const shouldAnalyzeBeforeTodo = (prompt: string) =>
 
 const buildTodoAnalysisPrompt = (prompt: string) =>
   [
-    '用户希望最终生成系统 TODO，但这个目标需要先做需求分析和步骤规划。',
-    '请先作为意图识别/分析 Agent 梳理需求，再给 TODO 助手可使用的拆分依据。',
+    '用户希望最终生成系统任务，但这个目标需要先做需求分析和步骤规划。',
+    '请先作为意图识别/分析智能体梳理需求，再给任务助手可使用的拆分依据。',
     '',
     `用户原始需求：${prompt}`,
     '',
     '输出要求：',
     '1. 先说明目标、关键模块、依赖顺序和主要风险。',
-    '2. 最后必须给出“建议 TODO：”小节。',
-    '3. “建议 TODO：”下输出 3-6 条编号任务，每条使用“任务标题：执行说明”的格式。'
+    '2. 最后必须给出“建议任务：”小节。',
+    '3. “建议任务：”下输出 3-6 条编号任务，每条使用“任务标题：执行说明”的格式。'
   ].join('\n')
 
 const getLatestAssistantText = (state: WorkbenchState, topicId: string) =>
@@ -1280,7 +1509,7 @@ const getLatestAssistantText = (state: WorkbenchState, topicId: string) =>
     .trim() ?? ''
 
 const extractTodoSection = (text: string) => {
-  const match = text.match(/建议\s*TODO[：:]\s*([\s\S]*)/u)
+  const match = text.match(/建议\s*(?:TODO|任务)[：:]\s*([\s\S]*)/u)
   return match?.[1]?.trim() || text
 }
 
@@ -1297,7 +1526,7 @@ const extractTodoCandidates = (prompt: string) => {
     .split(/\n+/)
     .map(normalizeTodoCandidate)
     .filter((item) => item.length >= 4)
-    .filter((item) => !/^(输出要求|用户原始需求|建议TODO|建议 TODO|目标|关键模块|依赖顺序|主要风险)[：:：]?/u.test(item))
+    .filter((item) => !/^(输出要求|用户原始需求|建议TODO|建议 TODO|建议任务|建议 任务|目标|关键模块|依赖顺序|主要风险)[：:：]?/u.test(item))
 
   if (lineCandidates.length >= 2) {
     return lineCandidates
@@ -1312,10 +1541,10 @@ const extractTodoCandidates = (prompt: string) => {
 const buildFallbackTodoPlan = (prompt: string) => {
   if (/智能问数|问数|BI|数据分析系统|数据问答/u.test(prompt)) {
     return [
-      '建议 TODO：',
+      '建议任务：',
       '1. 明确智能问数业务场景：梳理目标用户、核心问题类型、数据范围、权限边界和成功指标。',
       '2. 设计数据接入与语义层：盘点数据源、指标口径、维度层级、数据字典和权限过滤规则。',
-      '3. 规划问数 Agent 流程：定义意图识别、指标召回、SQL 生成、结果校验、图表推荐和追问澄清链路。',
+      '3. 规划问数智能体流程：定义意图识别、指标召回、SQL 生成、结果校验、图表推荐和追问澄清链路。',
       '4. 搭建原型与评测集：准备典型问法、标准 SQL、期望答案和失败样例，用于验证准确率。',
       '5. 实现工作台交互闭环：设计提问、澄清、图表展示、结果解释、收藏复用和人工反馈入口。',
       '6. 制定上线与运营计划：安排灰度发布、日志审计、质量监控、知识更新和权限合规检查。'
@@ -1323,7 +1552,7 @@ const buildFallbackTodoPlan = (prompt: string) => {
   }
 
   return [
-    '建议 TODO：',
+    '建议任务：',
     '1. 明确目标与验收标准：补充用户对象、业务边界、关键成功指标和不可做范围。',
     '2. 拆解核心模块与依赖：梳理功能模块、数据或系统依赖、优先级和先后顺序。',
     '3. 形成方案与原型：输出流程设计、交互草图、技术或执行方案，并标注关键风险。',
@@ -1438,7 +1667,9 @@ const consumeAgentEvents = async ({
                 runId: event.runId,
                 approvalId: event.approvalId,
                 toolCallId: event.toolCallId,
+                toolName: event.toolName,
                 risk: event.evaluation.risk,
+                reason: event.evaluation.reason,
                 approvalState: 'pending'
               }
             ),
@@ -1448,6 +1679,10 @@ const consumeAgentEvents = async ({
       )
     } else if (event.type === 'error') {
       runtimeError = event.message
+      console.error('Agent runtime failed', {
+        runId: event.runId,
+        message: event.message
+      })
     }
   }
 
@@ -1540,23 +1775,53 @@ export const sendAssistantReply = createAsyncThunk(
       return
     }
 
-    const matchedKnowledge = searchKnowledgeBases({
+    const embeddingProvider = state.providers.find(
+      (item) =>
+        item.id === (assistant.embeddingProviderId || state.settings.defaultEmbeddingProviderId) &&
+        item.enabled
+    )
+    const rerankProvider = state.providers.find(
+      (item) =>
+        item.id === (assistant.rerankProviderId || state.settings.defaultRerankProviderId) &&
+        item.enabled
+    )
+    const matchedKnowledge = await searchKnowledgeBases({
       prompt,
       bases: knowledgeBases,
-      files: state.files
+      files: state.files,
+      embeddingProvider,
+      embeddingModel: assistant.embeddingModel || state.settings.defaultEmbeddingModel,
+      rerankProvider,
+      rerankModel: assistant.rerankModel || state.settings.defaultRerankModel
     })
-    const candidateKnowledgeContexts = isIntentRouting
-      ? Object.fromEntries(
+    const candidateKnowledgeEntries = isIntentRouting
+      ? await Promise.all(
           state.assistants
             .filter((candidate) => candidate.id !== assistant.id)
-            .map((candidate) => {
+            .map(async (candidate): Promise<[string, string]> => {
               const candidateBases = state.knowledgeBases.filter((base) =>
                 candidate.knowledgeBaseIds.includes(base.id)
               )
-              const matches = searchKnowledgeBases({
+              const candidateEmbeddingProvider = state.providers.find(
+                (item) =>
+                  item.id ===
+                    (candidate.embeddingProviderId || state.settings.defaultEmbeddingProviderId) &&
+                  item.enabled
+              )
+              const candidateRerankProvider = state.providers.find(
+                (item) =>
+                  item.id ===
+                    (candidate.rerankProviderId || state.settings.defaultRerankProviderId) &&
+                  item.enabled
+              )
+              const matches = await searchKnowledgeBases({
                 prompt,
                 bases: candidateBases,
-                files: state.files
+                files: state.files,
+                embeddingProvider: candidateEmbeddingProvider,
+                embeddingModel: candidate.embeddingModel || state.settings.defaultEmbeddingModel,
+                rerankProvider: candidateRerankProvider,
+                rerankModel: candidate.rerankModel || state.settings.defaultRerankModel
               })
 
               const candidateMailContext =
@@ -1567,7 +1832,7 @@ export const sendAssistantReply = createAsyncThunk(
                   matches
                     .map(
                       (item) =>
-                        `[${item.base.name}・${item.file?.name ?? '知识库内容'}] ${item.excerpt}`
+                        `[${item.base.name}・${item.file?.name ?? '知识内容'}] ${item.excerpt}`
                         + (item.graphEvidence.length
                           ? `\n图谱线索：${item.graphEvidence.join('；')}`
                           : '')
@@ -1577,15 +1842,40 @@ export const sendAssistantReply = createAsyncThunk(
                 ].filter(Boolean).join('\n\n')
               ]
             })
-            .filter(([, context]) => Boolean(context))
         )
+      : undefined
+    const candidateKnowledgeContexts = candidateKnowledgeEntries
+      ? Object.fromEntries(candidateKnowledgeEntries.filter(([, context]) => Boolean(context)))
       : undefined
 
     const { message, blockId } = createStreamingAssistantMessage({
       topicId,
       assistantName: assistant.name
     })
+    const runStartedAt = Date.now()
     dispatch(startAssistantMessage(message))
+    dispatch(
+      updateAssistantMessageBlock({
+        messageId: message.id,
+        blockId,
+        patch: {
+          meta: {
+            runId,
+            assistantId: assistant.id,
+            assistantName: assistant.name,
+            providerId: provider?.id ?? '',
+            providerName: provider?.name ?? '未找到可用模型服务',
+            model: assistant.model,
+            knowledgeBaseNames: knowledgeBases.map((base) => base.name).join('、') || '无',
+            matchedKnowledgeCount: String(matchedKnowledge.length),
+            enabledToolNames: tools.map((tool) => tool.name).join('、') || '无',
+            networkAccess: tools.some((tool) => tool.category === 'search') ? '可能联网' : '未启用联网检索工具',
+            runStatus: 'running',
+            startedAt: new Date(runStartedAt).toISOString()
+          }
+        }
+      })
+    )
 
     let agentResult: Awaited<ReturnType<typeof consumeAgentEvents>> | null = null
     let providerError = ''
@@ -1618,7 +1908,7 @@ export const sendAssistantReply = createAsyncThunk(
                 matchedKnowledge
                   .map(
                     (item) =>
-                      `[${item.base.name}・${item.file?.name ?? '知识库内容'}] ${item.excerpt}`
+                      `[${item.base.name}・${item.file?.name ?? '知识内容'}] ${item.excerpt}`
                       + (item.graphEvidence.length
                         ? `\n图谱线索：${item.graphEvidence.join('；')}`
                         : '')
@@ -1636,24 +1926,53 @@ export const sendAssistantReply = createAsyncThunk(
           dispatch,
           signal: controller.signal
         })
-        providerError = agentResult.runtimeError
+        providerError = agentResult.runtimeError || agentResult.errorMessage || ''
       } catch (error) {
-        providerError = error instanceof Error ? error.message : 'Agent Runtime 调用失败'
+        providerError = error instanceof Error ? error.message : '智能体执行失败'
+        console.error('Agent runtime invocation failed', {
+          runId,
+          topicId,
+          assistantId: assistant.id,
+          providerId: provider.id,
+          model: assistant.model,
+          error
+        })
       }
     } else {
-      providerError = '未找到 Provider 配置'
+      providerError = '未找到可用模型服务'
+      console.error('Agent runtime failed before invocation', {
+        runId,
+        topicId,
+        assistantId: assistant.id,
+        providerError
+      })
     }
 
     if (controller.signal.aborted || agentResult?.status === 'cancelled') {
+      dispatch(
+        updateAssistantMessageBlock({
+          messageId: message.id,
+          blockId,
+          patch: {
+            meta: {
+              runStatus: 'cancelled',
+              finishedAt: now(),
+              durationMs: String(Date.now() - runStartedAt)
+            }
+          }
+        })
+      )
       dispatch(finishAssistantMessageBlock({ messageId: message.id, blockId }))
       activeAssistantRuns.delete(runId)
       return
     }
 
     if (
+      import.meta.env.DEV &&
+      state.settings.useMockResponsesWhenProviderFails &&
       !agentResult?.receivedText &&
       agentResult?.status !== 'awaiting-approval' &&
-      (!providerError || state.settings.useMockResponsesWhenProviderFails)
+      !providerError
     ) {
       const mockBlocks = composeAssistantBlocks({
         prompt,
@@ -1666,6 +1985,22 @@ export const sendAssistantReply = createAsyncThunk(
       const [mainBlock, ...extraBlocks] = mockBlocks
 
       if (mainBlock) {
+        dispatch(
+          updateAssistantMessageBlock({
+            messageId: message.id,
+            blockId,
+            patch: {
+              title: '模拟回复',
+              meta: {
+                simulated: 'true',
+                reason: '模型服务没有返回真实内容，且已开启模拟回复。',
+                runStatus: 'simulated',
+                finishedAt: now(),
+                durationMs: String(Date.now() - runStartedAt)
+              }
+            }
+          })
+        )
         await streamLocalText(
           mainBlock.content,
           (token) =>
@@ -1682,12 +2017,37 @@ export const sendAssistantReply = createAsyncThunk(
 
       if (!controller.signal.aborted) {
         extraBlocks.forEach((block) =>
-          dispatch(appendAssistantMessageBlock({ messageId: message.id, block }))
+          dispatch(
+            appendAssistantMessageBlock({
+              messageId: message.id,
+              block: {
+                ...block,
+                meta: {
+                  ...(block.meta ?? {}),
+                  simulated: 'true'
+                }
+              }
+            })
+          )
         )
       }
     } else if (!agentResult?.receivedText && providerError) {
+      dispatch(
+        updateAssistantMessageBlock({
+          messageId: message.id,
+          blockId,
+          patch: {
+            meta: {
+              runStatus: 'error',
+              errorMessage: providerError,
+              finishedAt: now(),
+              durationMs: String(Date.now() - runStartedAt)
+            }
+          }
+        })
+      )
       await streamLocalText(
-        'Agent Runtime 调用失败，且当前已关闭本地模拟回复。',
+        `智能体执行失败：${providerError}`,
         (token) =>
           dispatch(
             appendAssistantMessageBlockContent({
@@ -1697,6 +2057,22 @@ export const sendAssistantReply = createAsyncThunk(
             })
           ),
         controller.signal
+      )
+    }
+
+    if (!providerError && agentResult?.status) {
+      dispatch(
+        updateAssistantMessageBlock({
+          messageId: message.id,
+          blockId,
+          patch: {
+            meta: {
+              runStatus: agentResult.status,
+              finishedAt: now(),
+              durationMs: String(Date.now() - runStartedAt)
+            }
+          }
+        })
       )
     }
 
@@ -1716,13 +2092,19 @@ export const sendAssistantReply = createAsyncThunk(
     }
 
     matchedKnowledge.forEach((item) => {
-      const sourceFileName = item.file?.name ?? '知识库内容'
+      const sourceFileName = item.file?.name ?? '知识内容'
+      const referenceContent = [
+        item.excerpt,
+        item.graphEvidence.length
+          ? `图谱线索：${item.graphEvidence.join('；')}`
+          : ''
+      ].filter(Boolean).join('\n\n')
 
       dispatch(
         appendAssistantMessageBlock({
           messageId: message.id,
           block: {
-            ...createTextBlock(item.excerpt, `引用：${item.base.name}・${sourceFileName}`, {
+            ...createTextBlock(referenceContent, `引用：${item.base.name}・${sourceFileName}`, {
               chunks: String(item.base.chunkCount),
               status: item.base.status,
               chunkTokens: String(item.chunk.tokenCount),
@@ -1742,8 +2124,8 @@ export const sendAssistantReply = createAsyncThunk(
           block: {
             id: nanoid(),
             type: 'error',
-            title: 'Provider 状态',
-            content: `${providerError}${state.settings.useMockResponsesWhenProviderFails ? '，已回退到本地模拟回复。' : ''}`,
+            title: '模型服务状态',
+            content: providerError,
             status: 'done'
           }
         })
@@ -1829,7 +2211,7 @@ export const createTodoItemsFromWorkbench = createAsyncThunk(
           sourcePrompt = [
             prompt,
             '',
-            '意图识别/分析 Agent 的规划结论：',
+            '意图识别/分析智能体的规划结论：',
             todoPlan
           ].join('\n')
         } else {
@@ -1860,10 +2242,10 @@ export const runTodoTask = createAsyncThunk(
     const state = (thunkApi.getState() as RootState).workbench
     const todo = state.todoItems.find((item) => item.id === todoId)
     if (!todo) {
-      throw new Error('未找到 TODO 任务。')
+      throw new Error('未找到任务。')
     }
     if (state.activeTodoTaskId && state.activeTodoTaskId !== todoId) {
-      throw new Error('工作台当前已有 TODO 任务正在执行，请等待完成后再启动。')
+      throw new Error('工作台当前已有任务正在执行，请等待完成后再启动。')
     }
 
     const topicId = todo.workspaceTopicId ?? nanoid()
@@ -1871,11 +2253,11 @@ export const runTodoTask = createAsyncThunk(
       ? 'assistant-main'
       : state.assistants[0]?.id
     if (!assistantId) {
-      throw new Error('没有可用 Agent 执行 TODO。')
+      throw new Error('没有可用智能体执行任务。')
     }
 
     const prompt = [
-      `请执行这个系统 TODO：${todo.title}`,
+      `请执行这个系统任务：${todo.title}`,
       `任务组：${todo.taskGroup}`,
       todo.description ? `任务说明：${todo.description}` : '',
       '执行完成后，请总结已完成内容、产出结果和后续建议。'
@@ -1921,7 +2303,7 @@ export const runTodoTask = createAsyncThunk(
       dispatch(
         failTodoExecution({
           todoId,
-          errorMessage: error instanceof Error ? error.message : 'TODO 执行失败'
+          errorMessage: error instanceof Error ? error.message : '任务执行失败'
         })
       )
       throw error
@@ -1956,13 +2338,17 @@ export const respondToAgentApproval = createAsyncThunk(
       approvalBlockId,
       runId,
       approvalId,
-      approved
+      approved,
+      reason,
+      approvalState
     }: {
       messageId: string
       approvalBlockId: string
       runId: string
       approvalId: string
       approved: boolean
+      reason?: string
+      approvalState?: 'approved' | 'denied' | 'revised'
     },
     thunkApi
   ) => {
@@ -1976,7 +2362,9 @@ export const respondToAgentApproval = createAsyncThunk(
       resolveAgentApprovalBlock({
         messageId,
         blockId: approvalBlockId,
-        approved
+        approved,
+        reason,
+        approvalState
       })
     )
 
@@ -2019,7 +2407,7 @@ export const respondToAgentApproval = createAsyncThunk(
             block: {
               id: nanoid(),
               type: 'error',
-              title: 'Agent Runtime',
+              title: '智能体执行',
               content: event.message,
               status: 'done'
             }
@@ -2033,7 +2421,7 @@ export const respondToAgentApproval = createAsyncThunk(
         runId,
         approvalId,
         approved,
-        reason: approved ? '用户在 Emphant Studio 中批准执行。' : '用户拒绝执行。'
+        reason: reason ?? (approved ? '用户在 Emphant Studio 中批准执行。' : '用户拒绝执行。')
       })
     } finally {
       unsubscribe()
@@ -2065,13 +2453,41 @@ const workbenchSlice = createSlice({
         }
       }
       if (action.payload.providers) {
-        state.providers = action.payload.providers
+        state.providers = normalizeProviders(action.payload.providers)
+      }
+      if (legacyDefaultProviderIds.has(state.settings.defaultProviderId)) {
+        const chatgptProvider = state.providers.find((provider) => provider.id === 'provider-chatgpt')
+        state.settings.defaultProviderId = 'provider-chatgpt'
+        state.settings.defaultModel = chatgptProvider?.models[0] ?? 'gpt-4.1'
+      }
+      if (!state.settings.defaultEmbeddingProviderId && !state.settings.defaultEmbeddingModel) {
+        const chatgptProvider = state.providers.find((provider) => provider.id === 'provider-chatgpt')
+        if (chatgptProvider?.models.includes('text-embedding-3-small')) {
+          state.settings.defaultEmbeddingProviderId = 'provider-chatgpt'
+          state.settings.defaultEmbeddingModel = 'text-embedding-3-small'
+        }
+      }
+      if (!state.settings.defaultAsrProviderId && !state.settings.defaultAsrModel) {
+        const chatgptProvider = state.providers.find((provider) => provider.id === 'provider-chatgpt')
+        if (chatgptProvider?.models.includes('gpt-4o-mini-transcribe')) {
+          state.settings.defaultAsrProviderId = 'provider-chatgpt'
+          state.settings.defaultAsrModel = 'gpt-4o-mini-transcribe'
+        }
+      }
+      if (!state.settings.defaultTtsProviderId && !state.settings.defaultTtsModel) {
+        const chatgptProvider = state.providers.find((provider) => provider.id === 'provider-chatgpt')
+        if (chatgptProvider?.models.includes('gpt-4o-mini-tts')) {
+          state.settings.defaultTtsProviderId = 'provider-chatgpt'
+          state.settings.defaultTtsModel = 'gpt-4o-mini-tts'
+        }
       }
       if (action.payload.mcpTools) {
         state.mcpTools = action.payload.mcpTools
       }
       if (action.payload.mcpServers) {
-        state.mcpServers = action.payload.mcpServers
+        state.mcpServers = action.payload.mcpServers.filter(
+          (server) => !isUnusedPresetMcpServer(server)
+        )
       }
     },
     hydrateWorkspaceContent(
@@ -2118,9 +2534,10 @@ const workbenchSlice = createSlice({
     createTopic(state) {
       const topic: Topic = {
         id: nanoid(),
-        title: `新任务 ${state.topics.length + 1}`,
+        title: `新会话 ${state.topics.length + 1}`,
         updatedAt: now(),
-        titleMode: 'placeholder'
+        titleMode: 'placeholder',
+        workspaceDirectory: state.settings.defaultWorkingDirectory || undefined
       }
       state.topics.unshift(topic)
       state.activeTopicId = topic.id
@@ -2400,14 +2817,14 @@ const workbenchSlice = createSlice({
         makeMessage({
           role: 'assistant',
           topicId: action.payload.topicId,
-          assistantName: 'TODO助手',
+          assistantName: '任务助手',
           blocks: [
             createTextBlock(
               [
                 action.payload.analysisApplied
-                  ? '已先交给意图识别/分析 Agent 梳理需求，再由 TODO 助手生成系统 TODO。'
-                  : '已由 TODO 助手生成系统 TODO。',
-                `已生成任务组「${taskGroup}」，并添加 ${action.payload.items.length} 个系统 TODO：`,
+                  ? '已先交给意图识别/分析智能体梳理需求，再由任务助手生成系统任务。'
+                  : '已由任务助手生成系统任务。',
+                `已生成任务组「${taskGroup}」，并添加 ${action.payload.items.length} 个系统任务：`,
                 '',
                 ...action.payload.items.map(
                   (item, index) =>
@@ -2434,7 +2851,7 @@ const workbenchSlice = createSlice({
       if (!state.topics.some((topic) => topic.id === action.payload.topicId)) {
         state.topics.unshift({
           id: action.payload.topicId,
-          title: `TODO：${todo.title}`,
+          title: `任务：${todo.title}`,
           updatedAt: now(),
           titleMode: 'generated',
           assistantIds: [action.payload.assistantId],
@@ -2480,7 +2897,7 @@ const workbenchSlice = createSlice({
       state.todoNotifications.unshift({
         id: nanoid(),
         todoId: todo.id,
-        title: `TODO 已完成：${todo.title}`,
+        title: `任务已完成：${todo.title}`,
         message: action.payload.resultSummary,
         createdAt: now(),
         read: false,
@@ -2678,6 +3095,27 @@ const workbenchSlice = createSlice({
         block.content += action.payload.content
       }
     },
+    updateAssistantMessageBlock(
+      state,
+      action: PayloadAction<{
+        messageId: string
+        blockId: string
+        patch: Partial<Pick<MessageBlock, 'title' | 'meta' | 'type'>>
+      }>
+    ) {
+      const message = state.messages.find((item) => item.id === action.payload.messageId)
+      const block = message?.blocks.find((item) => item.id === action.payload.blockId)
+      if (block) {
+        const { meta, ...patch } = action.payload.patch
+        Object.assign(block, patch)
+        if (meta) {
+          block.meta = {
+            ...(block.meta ?? {}),
+            ...meta
+          }
+        }
+      }
+    },
     finishAssistantMessageBlock(
       state,
       action: PayloadAction<{
@@ -2731,6 +3169,8 @@ const workbenchSlice = createSlice({
         messageId: string
         blockId: string
         approved: boolean
+        reason?: string
+        approvalState?: 'approved' | 'denied' | 'revised'
       }>
     ) {
       const message = state.messages.find((item) => item.id === action.payload.messageId)
@@ -2738,13 +3178,70 @@ const workbenchSlice = createSlice({
       if (block) {
         block.meta = {
           ...block.meta,
-          approvalState: action.payload.approved ? 'approved' : 'denied'
+          approvalState:
+            action.payload.approvalState ?? (action.payload.approved ? 'approved' : 'denied'),
+          approvalReason:
+            action.payload.reason ??
+            (action.payload.approved ? '用户在 Emphant Studio 中批准执行。' : '用户拒绝执行。'),
+          decidedAt: now()
         }
-        block.title = action.payload.approved ? '已授权执行' : '已拒绝执行'
+        block.title =
+          action.payload.approvalState === 'revised'
+            ? '已修改后重试'
+            : action.payload.approved
+              ? '已授权执行'
+              : '已拒绝执行'
       }
     },
     updateSettings(state, action: PayloadAction<Partial<WorkspaceSettings>>) {
       state.settings = { ...state.settings, ...action.payload }
+      if (action.payload.defaultWorkingDirectory) {
+        state.topics.forEach((topic) => {
+          topic.workspaceDirectory ||= action.payload.defaultWorkingDirectory
+        })
+      }
+    },
+    updateDefaultLlmModel(
+      state,
+      action: PayloadAction<{ providerId: string; model: string }>
+    ) {
+      const previousProviderId = state.settings.defaultProviderId
+      const previousModel = state.settings.defaultModel
+
+      state.settings.defaultProviderId = action.payload.providerId
+      state.settings.defaultModel = action.payload.model
+      state.assistants.forEach((assistant) => {
+        if (assistant.providerId === previousProviderId && assistant.model === previousModel) {
+          assistant.providerId = action.payload.providerId
+          assistant.model = action.payload.model
+        }
+      })
+    },
+    syncDefaultModelToAgents(
+      state,
+      action: PayloadAction<{ modelType: ModelDefaultType; providerId: string; model: string }>
+    ) {
+      state.assistants.forEach((assistant) => {
+        if (action.payload.modelType === 'llm') {
+          assistant.providerId = action.payload.providerId
+          assistant.model = action.payload.model
+          return
+        }
+
+        if (action.payload.modelType === 'embedding') {
+          assistant.embeddingProviderId = action.payload.providerId
+          assistant.embeddingModel = action.payload.model
+        } else if (action.payload.modelType === 'asr') {
+          assistant.asrProviderId = action.payload.providerId
+          assistant.asrModel = action.payload.model
+        } else if (action.payload.modelType === 'tts') {
+          assistant.ttsProviderId = action.payload.providerId
+          assistant.ttsModel = action.payload.model
+        } else if (action.payload.modelType === 'rerank') {
+          assistant.rerankProviderId = action.payload.providerId
+          assistant.rerankModel = action.payload.model
+        }
+      })
     },
     updateAssistantModel(
       state,
@@ -2756,17 +3253,21 @@ const workbenchSlice = createSlice({
         assistant.model = action.payload.model
       }
     },
-    createAssistant(
-      state,
-      action: PayloadAction<{
-        name: string
-        description: string
-        providerId: string
-        model: string
-        systemPrompt: string
-        contextLimit: number
-      }>
-    ) {
+	    createAssistant(
+	      state,
+	      action: PayloadAction<{
+	        name: string
+	        description: string
+	        providerId: string
+	        model: string
+	        systemPrompt: string
+	        contextLimit: number
+	        capabilities?: string[]
+	        knowledgeBaseIds?: string[]
+	        enabledToolIds?: string[]
+	        enabledSkillIds?: string[]
+	      }>
+	    ) {
       const assistant: Assistant = {
         id: nanoid(),
         name: action.payload.name,
@@ -2775,10 +3276,12 @@ const workbenchSlice = createSlice({
         model: action.payload.model,
         systemPrompt: action.payload.systemPrompt,
         contextLimit: action.payload.contextLimit,
-        capabilities: ['聊天'],
-        knowledgeBaseIds: [],
-        enabledToolIds: []
-      }
+	        capabilities: action.payload.capabilities ?? ['聊天'],
+	        knowledgeBaseIds: action.payload.knowledgeBaseIds ?? [],
+	        enabledToolIds: action.payload.enabledToolIds ?? [],
+	        enabledSkillIds: action.payload.enabledSkillIds ?? [],
+	        source: 'user'
+	      }
       state.assistants.unshift(assistant)
     },
     updateAssistant(
@@ -2866,6 +3369,17 @@ const workbenchSlice = createSlice({
         Object.assign(provider, action.payload.patch)
       }
     },
+    addProviderConfig(state, action: PayloadAction<ProviderConfig>) {
+      state.providers.push(action.payload)
+    },
+    deleteProviderConfig(state, action: PayloadAction<string>) {
+      state.providers = state.providers.filter((provider) => provider.id !== action.payload)
+      if (state.settings.defaultProviderId === action.payload) {
+        const fallbackProvider = state.providers.find((provider) => provider.enabled) ?? state.providers[0]
+        state.settings.defaultProviderId = fallbackProvider?.id ?? ''
+        state.settings.defaultModel = fallbackProvider?.models[0] ?? ''
+      }
+    },
     updateMcpToolConfig(
       state,
       action: PayloadAction<{
@@ -2932,6 +3446,7 @@ const workbenchSlice = createSlice({
         chunkCount: 0,
         status: 'ready',
         tags: ['custom'],
+        source: 'user',
         chunks: buildKnowledgeChunks({
           sourceFileIds: action.payload.sourceFileIds,
           files: state.files,
@@ -3187,6 +3702,11 @@ export const {
   updateMcpToolConfig,
   upsertMcpServer,
   deleteMcpServer,
+  addProviderConfig,
+  deleteProviderConfig,
+  syncDefaultModelToAgents,
+  updateDefaultLlmModel,
+  updateAssistantMessageBlock,
   updateProviderConfig,
   updateSettings,
   updateSystemNote,

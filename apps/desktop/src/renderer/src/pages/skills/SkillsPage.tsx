@@ -180,12 +180,12 @@ export const SkillsPage = () => {
 
     if (editingSkillId) {
       dispatch(updateSkill({ skillId: editingSkillId, patch: normalizedValues }))
-      void message.success('Skill 已更新')
+      void message.success('技能已更新')
     } else {
       const skillId = `skill-${Date.now()}`
       dispatch(createSkill({ id: skillId, ...normalizedValues }))
       setSelectedSkillId(skillId)
-      void message.success('Skill 已创建')
+      void message.success('技能已创建')
     }
     setSkillModalOpen(false)
   }
@@ -200,11 +200,11 @@ export const SkillsPage = () => {
       if (result.skills[0]) {
         setSelectedSkillId(result.skills[0].id)
       }
-      void message.success(`已导入 ${result.skills.length} 个 Skill`)
+      void message.success(`已导入 ${result.skills.length} 个技能`)
       setImportModalOpen(false)
       setGithubSource('')
     } catch (error) {
-      void message.error(error instanceof Error ? error.message : 'Skill 导入失败')
+      void message.error(error instanceof Error ? error.message : '技能导入失败')
     } finally {
       setImporting(false)
     }
@@ -221,23 +221,23 @@ export const SkillsPage = () => {
     <div className="skills-layout">
       <Card className="workspace-panel skills-panel skills-panel--list" bordered={false}>
         <div className="panel-header skills-list-header">
-          <Typography.Title level={4}>Skills</Typography.Title>
+          <Typography.Title level={4}>技能</Typography.Title>
           <Space>
             <Button
               icon={<FolderOpenOutlined />}
               onClick={() => void handleImportLocal()}
-              aria-label="导入本地 Skill"
+              aria-label="导入本地技能"
             />
             <Button
               icon={<GithubOutlined />}
               onClick={() => setImportModalOpen(true)}
-              aria-label="导入 GitHub Skill"
+              aria-label="导入 GitHub 技能"
             />
             <Button
               type="primary"
               icon={<PlusOutlined />}
               onClick={openCreateSkill}
-              aria-label="新建 Skill"
+              aria-label="新建技能"
             />
           </Space>
         </div>
@@ -272,7 +272,7 @@ export const SkillsPage = () => {
                   <span>{skill.description || '暂未补充描述'}</span>
                 </button>
                 <div className="select-card__actions">
-                  <Tag bordered={false}>{skill.kind === 'code' ? '代码型' : 'Prompt'}</Tag>
+                  <Tag bordered={false}>{skill.kind === 'code' ? '代码型' : '提示词'}</Tag>
                   <span>{skill.tags.length} 标签</span>
                 </div>
               </div>
@@ -281,11 +281,11 @@ export const SkillsPage = () => {
           {filteredSkills.length === 0 && (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={skills.length === 0 ? '还没有 Skill' : '没有匹配的 Skill'}
+              description={skills.length === 0 ? '还没有技能' : '没有匹配的技能'}
             >
               {skills.length === 0 && (
                 <Button type="primary" onClick={openCreateSkill}>
-                  创建第一个 Skill
+                  创建第一个技能
                 </Button>
               )}
             </Empty>
@@ -309,18 +309,18 @@ export const SkillsPage = () => {
                     </Tag>
                   </Space>
                   <Typography.Paragraph type="secondary">
-                    {activeSkill.description || '这个 Skill 还没有补充描述。'}
+                    {activeSkill.description || '这个技能还没有补充描述。'}
                   </Typography.Paragraph>
                 </div>
               </div>
               <Space wrap>
                 <Button onClick={openEditSkill}>编辑信息</Button>
                 <Popconfirm
-                  title={`删除 Skill ${activeSkill.name}？`}
+                  title={`删除技能 ${activeSkill.name}？`}
                   description="删除后无法恢复。"
                   onConfirm={() => {
                     dispatch(deleteSkill(activeSkill.id))
-                    void message.success('Skill 已删除')
+                    void message.success('技能已删除')
                   }}
                 >
                   <Button danger>删除</Button>
@@ -333,7 +333,7 @@ export const SkillsPage = () => {
                 <div className="skill-card-section-header">
                   <div>
                     <strong>运行状态</strong>
-                    <span>停用后所有 Agent 都不会使用这项能力。</span>
+                    <span>停用后所有智能体都不会使用这项能力。</span>
                   </div>
                   <Switch
                     checked={activeSkill.enabled}
@@ -344,36 +344,36 @@ export const SkillsPage = () => {
                   <CheckCircleFilled />
                   <span>
                     {activeSkill.enabled
-                      ? '已参与 Agent 运行配置'
-                      : '当前不会参与 Agent 运行'}
+                      ? '已参与智能体运行配置'
+                      : '当前不会参与智能体运行'}
                   </span>
                 </div>
               </div>
 
               <div className="provider-card skill-config-card">
-                <strong>Skill 类型</strong>
+                <strong>技能类型</strong>
                 <span>
                   {activeSkill.kind === 'code'
-                    ? '代码型 Skill 可从本地目录或开源仓库导入，当前作为受控能力说明供 Agent 选择。'
-                    : 'Prompt Skill 会向 Agent 注入任务方法、输出格式和边界。'}
+                    ? '代码型技能可从本地目录或开源仓库导入，当前作为受控能力说明供智能体选择。'
+                    : '提示词技能会向智能体注入任务方法、输出格式和边界。'}
                 </span>
                 <Tag icon={activeSkill.kind === 'code' ? <CodeOutlined /> : <AppstoreOutlined />}>
-                  {activeSkill.kind === 'code' ? '代码型 Skill' : 'Prompt Skill'}
+                  {activeSkill.kind === 'code' ? '代码型技能' : '提示词技能'}
                 </Tag>
               </div>
             </div>
 
             <div className="provider-card">
-              <strong>Skill 指令</strong>
-              <span>被 Agent 挂载并匹配当前任务时，会追加到系统提示词中。</span>
+              <strong>技能指令</strong>
+              <span>被智能体启用并匹配当前任务时，会追加到系统提示词中。</span>
               <Typography.Paragraph className="skills-instructions">
-                {activeSkill.instructions || '还没有配置 Skill 指令。'}
+                {activeSkill.instructions || '还没有配置技能指令。'}
               </Typography.Paragraph>
             </div>
 
             <div className="provider-card">
               <strong>能力标签</strong>
-              <span>用于快速检索和识别这个 Skill 的适用场景。</span>
+              <span>用于快速检索和识别这个技能的适用场景。</span>
               <Space wrap>
                 {activeSkill.tags.length > 0 ? (
                   activeSkill.tags.map((tag) => (
@@ -396,7 +396,7 @@ export const SkillsPage = () => {
               </div>
               <div className="provider-card">
                 <strong>触发词</strong>
-                <span>Agent 会据此判断当前任务是否需要使用这个 Skill。</span>
+                <span>智能体会据此判断当前任务是否需要使用这个技能。</span>
                 <Space wrap>
                   {(activeSkill.triggers ?? []).map((trigger) => (
                     <Tag key={trigger}>{trigger}</Tag>
@@ -439,11 +439,11 @@ export const SkillsPage = () => {
 
             <div className="provider-card">
               <strong>执行资源</strong>
-              <span>Skill 本身不绑定 Agent。请在 Agent 页面选择哪些 Agent 可以挂载它。</span>
+              <span>技能本身不绑定智能体。请在智能体页面选择哪些智能体可以使用它。</span>
               <div className="skill-resource-grid">
                 <div>
                   <span>类型</span>
-                  <strong>{activeSkill.kind === 'code' ? '代码型' : 'Prompt'}</strong>
+                  <strong>{activeSkill.kind === 'code' ? '代码型' : '提示词'}</strong>
                   <Typography.Text type="secondary">运行时按任务内容选择</Typography.Text>
                 </div>
                 <div>
@@ -469,10 +469,10 @@ export const SkillsPage = () => {
           <div className="agents-empty">
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="选择或创建一个 Skill 开始配置"
+              description="选择或创建一个技能开始配置"
             >
               <Button type="primary" onClick={openCreateSkill}>
-                新建 Skill
+                新建技能
               </Button>
             </Empty>
           </div>
@@ -481,7 +481,7 @@ export const SkillsPage = () => {
 
       <Modal
         open={skillModalOpen}
-        title={editingSkillId ? '编辑 Skill' : '新建 Skill'}
+        title={editingSkillId ? '编辑技能' : '新建技能'}
         onCancel={() => setSkillModalOpen(false)}
         onOk={() => void handleSubmitSkill()}
         okText={editingSkillId ? '保存' : '创建'}
@@ -493,7 +493,7 @@ export const SkillsPage = () => {
             label="名称"
             name="name"
             rules={[
-              { required: true, message: '请输入 Skill 名称' },
+              { required: true, message: '请输入技能名称' },
               {
                 validator: (_, value: string) =>
                   value?.trim()
@@ -508,21 +508,21 @@ export const SkillsPage = () => {
             <Input.TextArea
               autoSize={{ minRows: 2, maxRows: 4 }}
               maxLength={160}
-              placeholder="说明这个 Skill 适合处理什么任务"
+              placeholder="说明这个技能适合处理什么任务"
             />
           </Form.Item>
           <Form.Item label="类型" name="kind" rules={[{ required: true }]}>
             <Select
               options={[
-                { label: 'Prompt Skill', value: 'prompt' },
-                { label: '代码型 Skill', value: 'code' }
+                { label: '提示词技能', value: 'prompt' },
+                { label: '代码型技能', value: 'code' }
               ]}
             />
           </Form.Item>
           <Form.Item
-            label="Skill 指令"
+            label="技能指令"
             name="instructions"
-            rules={[{ required: true, message: '请输入 Skill 指令' }]}
+            rules={[{ required: true, message: '请输入技能指令' }]}
           >
             <Input.TextArea
               autoSize={{ minRows: 4, maxRows: 7 }}
@@ -597,7 +597,7 @@ export const SkillsPage = () => {
 
       <Modal
         open={importModalOpen}
-        title="导入 GitHub Skill"
+        title="导入 GitHub 技能"
         onCancel={() => setImportModalOpen(false)}
         onOk={() => void importSkills(githubSource, 'github')}
         okText="导入"

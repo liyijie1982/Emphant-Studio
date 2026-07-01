@@ -14,16 +14,20 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+aes-gcm = "0.10"
+argon2 = "0.5"
 base64 = "0.22"
+calamine = "0.26"
 chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
 dirs = "6"
 imap = "2"
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 lettre = { version = "0.11", features = ["builder", "smtp-transport", "rustls-tls"], default-features = false }
 mailparse = "0.15"
 mime_guess = "2"
 native-tls = "0.2"
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
+rand = "0.8"
+reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls", "stream"], default-features = false }
 futures-util = "0.3"
 rfd = "0.15"
 rusqlite = { version = "0.32", features = ["bundled"] }

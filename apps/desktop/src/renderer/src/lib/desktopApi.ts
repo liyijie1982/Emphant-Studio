@@ -7,6 +7,7 @@ import type {
   AgentRuntimeEvent,
   AgentTopicTitleRequest,
   AppInfo,
+  AudioTranscriptionRequest,
   CredentialSetRequest,
   CredentialStatusRequest,
   DocumentExtractionRequest,
@@ -29,6 +30,9 @@ import type {
   MemoryProfileFactUpdateRequest,
   MemoryProfileRelationUpdateRequest,
   ProviderConfig,
+  SecretVaultStatus,
+  SecretVaultUnlockRequest,
+  SpeechSynthesisRequest,
   SkillImportRequest,
   SkillImportResult,
   WorkspaceContentSnapshot,
@@ -41,8 +45,12 @@ const toBytes = (bytes: Uint8Array | number[]) =>
 
 const tauriApi = {
   getAppInfo: (): Promise<AppInfo> => invoke('get_app_info'),
-  scanWorkspaceFiles: (query: string, limit = 5): Promise<WorkspaceFileMatch[]> =>
-    invoke('scan_workspace_files', { payload: { query, limit } }),
+  scanWorkspaceFiles: (
+    query: string,
+    limit = 5,
+    workspaceDirectory?: string
+  ): Promise<WorkspaceFileMatch[]> =>
+    invoke('scan_workspace_files', { payload: { query, limit, workspaceDirectory } }),
   readWorkspaceFile: (path: string): Promise<WorkspaceFileContent> =>
     invoke('read_workspace_file', { payload: { path } }),
   extractDocument: (
@@ -76,6 +84,8 @@ const tauriApi = {
         snapshot
       }
     }),
+  reindexWorkspace: (workspaceDirectory?: string): Promise<void> =>
+    invoke('reindex_workspace', { payload: { workspaceDirectory } }),
   saveKnowledgeSource: (request: KnowledgeSourceSaveRequest): Promise<string> =>
     invoke('save_knowledge_source', {
       request: {
@@ -91,6 +101,30 @@ const tauriApi = {
     request: KnowledgeIndexRequest
   ): Promise<KnowledgeIndexResult> =>
     invoke('index_knowledge_source', { request }),
+  embedTexts: (
+    provider: ProviderConfig,
+    model: string,
+    texts: string[]
+  ): Promise<number[][]> =>
+    invoke('embed_texts', { request: { provider, model, texts } }),
+  rerankDocuments: (
+    provider: ProviderConfig,
+    model: string,
+    query: string,
+    documents: string[]
+  ): Promise<number[]> =>
+    invoke('rerank_documents', { request: { provider, model, query, documents } }),
+  transcribeAudio: (request: AudioTranscriptionRequest): Promise<string> =>
+    invoke('transcribe_audio', {
+      request: {
+        ...request,
+        bytes: toBytes(request.bytes)
+      }
+    }),
+  synthesizeSpeech: async (request: SpeechSynthesisRequest): Promise<Uint8Array> => {
+    const bytes = await invoke<number[]>('synthesize_speech', { request })
+    return new Uint8Array(bytes)
+  },
   startKnowledgeExtraction: (request: KnowledgeExtractionRequest): Promise<void> =>
     invoke('start_knowledge_extraction', { request }),
   onKnowledgeExtractionEvent: (listener: (event: KnowledgeExtractionEvent) => void) => {
@@ -147,6 +181,14 @@ const tauriApi = {
     invoke('delete_credential', { request }),
   hasCredential: (request: CredentialStatusRequest): Promise<boolean> =>
     invoke('has_credential', { request }),
+  secretVaultStatus: (): Promise<SecretVaultStatus> =>
+    invoke('secret_vault_status'),
+  unlockSecretVault: (request: SecretVaultUnlockRequest): Promise<SecretVaultStatus> =>
+    invoke('unlock_secret_vault', { request }),
+  lockSecretVault: (): Promise<SecretVaultStatus> =>
+    invoke('lock_secret_vault'),
+  resetSecretVault: (): Promise<SecretVaultStatus> =>
+    invoke('reset_secret_vault'),
   listProviderModels: (provider: ProviderConfig): Promise<string[]> =>
     invoke('list_provider_models', { provider }),
   testMcpServer: (server: McpServerConfig): Promise<McpServerTestResult> =>

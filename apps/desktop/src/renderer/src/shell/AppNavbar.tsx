@@ -3,6 +3,7 @@ import { Avatar, Badge, Button, Dropdown, Empty, Popover, Space, Typography } fr
 import type { MenuProps } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useWindowDrag } from '@/hooks/useWindowDrag'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import {
   createMailTask,
@@ -12,7 +13,11 @@ import {
   setActiveTopic
 } from '@/store/workbenchSlice'
 
-export const AppNavbar = () => {
+type AppNavbarProps = {
+  onLogout: () => void
+}
+
+export const AppNavbar = ({ onLogout }: AppNavbarProps) => {
   const dispatch = useAppDispatch()
   const navigate = useNavigate()
   const unreadMails = useAppSelector(selectUnreadMailNotifications)
@@ -20,6 +25,7 @@ export const AppNavbar = () => {
   const notificationCount = unreadMails.length + unreadTodoNotifications.length
   const [avatarDataUrl, setAvatarDataUrl] = useState<string>()
   const [notificationOpen, setNotificationOpen] = useState(false)
+  const startWindowDrag = useWindowDrag()
   const mailTypeLabel = (type: 'personal' | 'work' | 'unknown') =>
     type === 'work' ? '公司邮件' : type === 'personal' ? '个人邮件' : '其他邮件'
   useEffect(() => {
@@ -43,19 +49,23 @@ export const AppNavbar = () => {
       label: '个人设置'
     },
     {
+      key: 'lock-vault',
+      label: '锁定保险箱'
+    },
+    {
       key: 'logout',
       label: '退出登录'
     }
   ]
 
   return (
-    <header className="app-navbar">
-      <div className="app-navbar__intro">
-        <Typography.Title level={4} style={{ margin: 0 }}>
+    <header className="app-navbar" data-tauri-drag-region="" onMouseDown={startWindowDrag}>
+      <div className="app-navbar__intro" data-tauri-drag-region="" onMouseDown={startWindowDrag}>
+        <Typography.Title level={4} style={{ margin: 0 }} data-tauri-drag-region="">
           Emphant Studio
         </Typography.Title>
-        <Typography.Text type="secondary">
-          面向多模型与工具调用的桌面 AI 工作台
+        <Typography.Text type="secondary" data-tauri-drag-region="">
+          管理对话、知识、任务和自动化动作
         </Typography.Text>
       </div>
       <Space size={12} className="app-navbar__actions">
@@ -137,6 +147,8 @@ export const AppNavbar = () => {
             onClick: ({ key }) => {
               if (key === 'profile-info') navigate('/profile')
               if (key === 'profile-settings') navigate('/profile/settings')
+              if (key === 'lock-vault') onLogout()
+              if (key === 'logout') onLogout()
             }
           }}
           trigger={['click']}

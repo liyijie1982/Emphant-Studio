@@ -105,6 +105,26 @@ pnpm tauri
 | `pnpm typecheck` | Run TypeScript checks for the desktop package. |
 | `pnpm lint` | Run ESLint for the desktop renderer source. |
 
+## Releases
+
+GitHub Releases are built by `.github/workflows/release.yml`.
+
+The release workflow publishes desktop bundles for:
+
+- Windows x86_64
+- macOS Apple Silicon
+- Linux x86_64
+- Linux ARM64
+
+To publish `v0.1.0`, push the release tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow creates a draft release first, uploads all platform artifacts, and publishes the release only after all builds succeed.
+
 ## Development Notes
 
 - The desktop renderer lives in `apps/desktop/src/renderer`.

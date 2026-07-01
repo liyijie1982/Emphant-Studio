@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Emphant Studio Tauri desktop AI workspace",
   "author": "Emphant Studio",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {

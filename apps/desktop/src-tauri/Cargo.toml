@@ -3,6 +3,7 @@ name = "emphant-studio-tauri"
 version = "0.1.0"
 description = "Emphant Studio Tauri desktop AI workspace"
 authors = ["Emphant Studio"]
+license = "MIT"
 edition = "2021"
 rust-version = "1.77"
 

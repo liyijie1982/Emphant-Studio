@@ -1,29 +1,33 @@
 # Emphant Studio
 
-Emphant Studio is a Tauri desktop AI workspace built with React, TypeScript, Redux Toolkit, Ant Design, and pnpm workspaces.
+Emphant Studio is an open-source Tauri desktop AI workspace for local-first productivity workflows. It brings together conversations, agents, files, knowledge bases, notes, tasks, profile settings, and provider/tool configuration in a single desktop workbench.
 
-The current app focuses on a local-first desktop workbench for AI-assisted productivity: conversations, agents, files, knowledge bases, notes, tasks, profile settings, and provider/tool configuration.
+The project is built with Tauri 2, React, TypeScript, Redux Toolkit, Ant Design, Rust, and pnpm workspaces.
+
+## Status
+
+Emphant Studio is under active early development. APIs, storage formats, and desktop behavior may change before a stable release.
 
 ## Features
 
-- Desktop shell powered by Tauri 2.
-- React renderer with route-based workbench pages.
+- Local-first desktop shell powered by Tauri 2.
+- Route-based React workbench for chat, agents, skills, files, knowledge, notes, todos, profile, and settings.
 - Multi-topic AI chat workspace with assistant selection and structured message blocks.
-- Agent, skill, file, knowledge, note, todo, profile, and settings pages.
+- Provider and tool configuration screens for AI-assisted workflows.
+- Markdown rendering with GitHub Flavored Markdown and syntax highlighting.
+- Shared workspace package for cross-app constants and TypeScript types.
 - Mock AI runtime and local workbench state for fast UI iteration.
-- Markdown rendering with GFM and syntax highlighting.
-- Shared package for cross-app constants and TypeScript types.
 
 ## Tech Stack
 
 - Tauri 2
+- Rust and Cargo
 - React 19
 - TypeScript
 - Vite
 - Redux Toolkit
 - Ant Design
 - pnpm workspace
-- Rust/Cargo for the native desktop layer
 
 ## Project Structure
 
@@ -33,7 +37,7 @@ The current app focuses on a local-first desktop workbench for AI-assisted produ
 |   `-- desktop/
 |       |-- src/
 |       |   `-- renderer/        # React desktop UI
-|       `-- src-tauri/           # Tauri native app
+|       `-- src-tauri/           # Tauri native desktop layer
 |-- packages/
 |   `-- shared/                  # Shared constants and TypeScript types
 |-- package.json                 # Workspace scripts
@@ -44,12 +48,14 @@ The current app focuses on a local-first desktop workbench for AI-assisted produ
 
 ## Requirements
 
-- Node.js
-- pnpm 10.x
-- Rust toolchain
-- Tauri system dependencies for your operating system
+- Node.js 20 or newer is recommended.
+- pnpm 10.x.
+- Rust stable toolchain.
+- Tauri system dependencies for your operating system.
 
-For Tauri platform setup, follow the official prerequisites for your OS before running the desktop app.
+Before running the app, install the official Tauri prerequisites for your platform:
+
+- [Tauri prerequisites](https://tauri.app/start/prerequisites/)
 
 ## Getting Started
 
@@ -77,13 +83,13 @@ Run linting:
 pnpm lint
 ```
 
-Build the renderer:
+Build the desktop renderer:
 
 ```bash
 pnpm build
 ```
 
-Run Tauri CLI commands:
+Run Tauri CLI commands for the desktop package:
 
 ```bash
 pnpm tauri
@@ -101,11 +107,27 @@ pnpm tauri
 
 ## Development Notes
 
-- The repository intentionally ignores `node_modules/`, Vite build output, Tauri `target/`, logs, local environment files, and macOS `.DS_Store` files.
-- The desktop renderer lives under `apps/desktop/src/renderer`.
-- The Tauri configuration lives at `apps/desktop/src-tauri/tauri.conf.json`.
+- The desktop renderer lives in `apps/desktop/src/renderer`.
+- The Tauri application lives in `apps/desktop/src-tauri`.
 - Shared app types live in `packages/shared/src/types.ts`.
+- Generated dependencies, build output, Tauri targets, logs, local environment files, and macOS `.DS_Store` files are intentionally ignored.
+
+## Contributing
+
+Contributions are welcome. To contribute:
+
+1. Fork the repository.
+2. Create a feature branch.
+3. Make a focused change with matching checks where practical.
+4. Run `pnpm typecheck` and `pnpm lint` before submitting.
+5. Open a pull request with a clear description of the change.
+
+Please keep issues and pull requests focused, reproducible, and respectful.
+
+## Security
+
+Please do not disclose security issues publicly before maintainers have had time to review them. If you find a vulnerability, open a private security advisory on GitHub or contact the maintainers through the repository's published security contact.
 
 ## License
 
-Private project. Add a license file before distributing publicly.
+Emphant Studio is open source software licensed under the [MIT License](./LICENSE).

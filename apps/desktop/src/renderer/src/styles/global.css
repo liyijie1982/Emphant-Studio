@@ -958,17 +958,40 @@ a {
 .conversation-context {
   flex: 0 0 auto;
   margin-bottom: 12px;
-  padding: 12px 14px;
+  padding: 8px 10px;
   border: 1px solid rgba(140, 180, 255, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.026);
 }
 
+.conversation-context.is-expanded {
+  padding: 12px 14px;
+}
+
 .conversation-context__main {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.conversation-context__main:hover .conversation-context__eyebrow,
+.conversation-context__main:focus-visible .conversation-context__eyebrow {
+  color: var(--accent-strong);
+}
+
+.conversation-context__main:focus-visible {
+  outline: 2px solid rgba(140, 180, 255, 0.42);
+  outline-offset: 4px;
+  border-radius: 6px;
 }
 
 .conversation-context__main > div:first-child {
@@ -976,7 +999,9 @@ a {
 }
 
 .conversation-context__eyebrow {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 3px;
   color: var(--text-muted);
   font-size: 11px;
@@ -1038,24 +1063,19 @@ a {
 }
 
 .conversation-greeting {
-  width: min(680px, 92%);
+  width: min(560px, 92%);
   margin: auto;
-  padding: 42px 44px;
-  border: 1px solid rgba(140, 180, 255, 0.16);
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 18% 0%, rgba(140, 180, 255, 0.12), transparent 42%),
-    rgba(255, 255, 255, 0.025);
+  padding: 24px 28px 26px;
+  border-left: 2px solid rgba(140, 180, 255, 0.42);
+  background: linear-gradient(90deg, rgba(140, 180, 255, 0.055), rgba(255, 255, 255, 0));
 }
 
 .conversation-greeting__eyebrow {
   display: block;
-  margin-bottom: 16px;
-  color: var(--accent-strong);
+  margin-bottom: 10px;
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 .conversation-greeting .ant-typography {
@@ -1063,17 +1083,18 @@ a {
 }
 
 .conversation-greeting h2.ant-typography {
-  margin-bottom: 12px;
-  font-size: clamp(22px, 2.6vw, 30px);
-  line-height: 1.18;
-  letter-spacing: -0.012em;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.24;
 }
 
 .conversation-greeting .ant-typography-paragraph {
-  max-width: 560px;
+  max-width: 480px;
   color: var(--text-secondary);
-  font-size: 15px;
-  line-height: 1.8;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .message-bubble {

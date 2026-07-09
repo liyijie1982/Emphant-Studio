@@ -7006,8 +7006,8 @@ async fn get_memory_greeting(app: AppHandle) -> CommandResult<Value> {
         "userName": user_name,
         "message": user_name
             .as_ref()
-            .map(|name| format!("{}，欢迎回来。", name))
-            .unwrap_or_else(|| "你好，我是 Emphant Studio。".into())
+            .map(|name| format!("{}，把目标、材料或一个粗略想法发过来，我会沿着当前会话的上下文继续。", name))
+            .unwrap_or_else(|| "把目标、材料或一个粗略想法发过来，我会沿着当前会话的上下文继续。".into())
     }))
 }
 

@@ -799,6 +799,7 @@ export const HomePage = () => {
   const [memoryGreeting, setMemoryGreeting] = useState<MemoryGreeting | null>(null)
   const [memoryProfile, setMemoryProfile] = useState<MemoryProfile | null>(null)
   const [isTopicListVisible, setIsTopicListVisible] = useState(true)
+  const [isConversationContextExpanded, setIsConversationContextExpanded] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
@@ -990,8 +991,7 @@ export const HomePage = () => {
       .catch(() => {
         if (active) {
           setMemoryGreeting({
-            message:
-              '你好！很高兴见到你。你可以告诉我你的姓名、职业、偏好或当前目标，完善个人信息后，我能为你提供更贴合的服务。'
+            message: '把目标、材料或一个粗略想法发过来，我会沿着当前会话的上下文继续。'
           })
         }
       })
@@ -1799,10 +1799,21 @@ export const HomePage = () => {
               }
             />
           )}
-          <section className="conversation-context" aria-label="当前会话上下文">
-            <div className="conversation-context__main">
+          <section
+            className={`conversation-context${isConversationContextExpanded ? ' is-expanded' : ''}`}
+            aria-label="当前会话上下文"
+          >
+            <button
+              type="button"
+              className="conversation-context__main"
+              aria-expanded={isConversationContextExpanded}
+              onClick={() => setIsConversationContextExpanded((value) => !value)}
+            >
               <div>
-                <span className="conversation-context__eyebrow">会话上下文</span>
+                <span className="conversation-context__eyebrow">
+                  {isConversationContextExpanded ? <DownOutlined /> : <RightOutlined />}
+                  会话上下文
+                </span>
                 <strong>{activeTopic?.title ?? '未选择会话'}</strong>
               </div>
               <Space size={8} wrap>
@@ -1812,32 +1823,27 @@ export const HomePage = () => {
                 </Tag>
                 {pendingApprovalCount > 0 && <Tag color="red">待确认 {pendingApprovalCount}</Tag>}
               </Space>
-            </div>
-            <div className="conversation-context__grid">
-              {contextSummaryItems.map((item) => (
-                <div key={item.label} className="conversation-context__item">
-                  <span>{item.label}</span>
-                  <strong title={item.value}>{item.value}</strong>
-                </div>
-              ))}
-            </div>
+            </button>
+            {isConversationContextExpanded && (
+              <div className="conversation-context__grid">
+                {contextSummaryItems.map((item) => (
+                  <div key={item.label} className="conversation-context__item">
+                    <span>{item.label}</span>
+                    <strong title={item.value}>{item.value}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
           <div className="message-list" ref={messageListRef}>
             {activeTopic && messages.length === 0 && memoryGreeting && (
               <section className="conversation-greeting" aria-live="polite">
-                <span className="conversation-greeting__eyebrow">Emphant Studio</span>
+                <span className="conversation-greeting__eyebrow">当前会话</span>
                 <Typography.Title level={2}>
-                  {memoryGreeting.userName
-                    ? `你好，${memoryGreeting.userName}`
-                    : '你好，很高兴见到你'}
+                  {memoryGreeting.userName ? `${memoryGreeting.userName}，从这里开始` : '从这里开始'}
                 </Typography.Title>
                 <Typography.Paragraph>
-                  {memoryGreeting.message.replace(
-                    memoryGreeting.userName
-                      ? `你好，${memoryGreeting.userName}！很高兴见到你。`
-                      : '你好！很高兴见到你。',
-                    ''
-                  )}
+                  {memoryGreeting.message}
                 </Typography.Paragraph>
               </section>
             )}
